@@ -1,0 +1,1403 @@
+"use client";
+
+import { useState, useEffect, useMemo, use } from "react";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import { useToast } from "@/components/toast";
+import {
+  submitAfterActionReport,
+  submitPromotionRoll,
+  purchaseCebLevel,
+  purchaseConsumable,
+} from "../../../actions";
+import {
+  calculateGameXP,
+  calculatePromotionTN,
+  isPromotionSuccess,
+  CEB_LEVEL_COSTS,
+  PROMOTION_BENEFITS,
+  getCebActivationLimits,
+} from "@/lib/utils/xp-calculator";
+import type {
+  GameResultType,
+  CebColumnType,
+  ConsumableType,
+  Campaign,
+  Chapter,
+  GameResult,
+  CommandExperience,
+  CommanderPromotion,
+  SpecOps,
+  Consumable,
+} from "@/lib/types/database";
+
+// CEB column definitions with descriptions
+const CEB_COLUMNS: {
+  key: CebColumnType;
+  label: string;
+  shortLabel: string;
+  levels: string[];
+}[] = [
+  {
+    key: "mobile_reserve",
+    label: "Mobile Reserve",
+    shortLabel: "MOB RES",
+    levels: [
+      "+5 Army Points",
+      "+10 Army Points",
+      "+10 Army Points",
+      "+15 Army Points",
+    ],
+  },
+  {
+    key: "logistical_support",
+    label: "Logistical Support",
+    shortLabel: "LOG SUP",
+    levels: [
+      "+1 to all disposable weapons",
+      "+1 to all disposable & +1 SWC",
+      "+1 CR turret in friendly DZ",
+      "+1 Baggage Bot for Free",
+    ],
+  },
+  {
+    key: "military_intelligence",
+    label: "Military Intelligence",
+    shortLabel: "MIL INT",
+    levels: [
+      "+3 Initiative Roll, +3 Promotion",
+      "Enemy has AD? +3 Promotion",
+      "Enemy has Hidden Deploy?",
+      "Copy enemy list, +3 Promotion",
+    ],
+  },
+  {
+    key: "tech_support",
+    label: "Tech Support",
+    shortLabel: "TECH",
+    levels: [
+      "All REMs gain +3 BTS",
+      "All HI may reroll reset rolls",
+      "All Hackers gain +3 BTS",
+      "FOs may FO in ZoC w/o LoS",
+    ],
+  },
+  {
+    key: "recon_intel",
+    label: "Recon Intelligence",
+    shortLabel: "RECON",
+    levels: [
+      "Draw 3 Classifieds, keep 1",
+      "Auto pass 1 objective roll",
+      "Enemy reveals Classifieds",
+      "Trigger sensor 2x after deploy",
+    ],
+  },
+  {
+    key: "dice_gods",
+    label: "The Dice Gods",
+    shortLabel: "DICE",
+    levels: [
+      "Reroll 1 die per game",
+      "+3 success value, 1 roll/chapter",
+      "Auto crit 1 roll per chapter",
+      "Auto crit 1 roll per game round",
+    ],
+  },
+];
+
+const CONSUMABLE_DEFS: {
+  key: ConsumableType;
+  label: string;
+  cost: number;
+  description: string;
+}[] = [
+  {
+    key: "reinforcements",
+    label: "Reinforcements",
+    cost: 2,
+    description: "+8 AP, +0.5 SWC for next chapter",
+  },
+  {
+    key: "emergency_medical",
+    label: "Emergency Medical",
+    cost: 2,
+    description: "2 S2 units <25pts gain Medikit",
+  },
+  {
+    key: "emergency_tech",
+    label: "Emergency Tech",
+    cost: 2,
+    description: "2 S2 units <25pts gain Gizmokit",
+  },
+  {
+    key: "emergency_ordinance",
+    label: "Emergency Ordinance",
+    cost: 4,
+    description: "2 S2 units <18pts gain Panzerfaust",
+  },
+  {
+    key: "move_up",
+    label: "Move Up",
+    cost: 4,
+    description: '2 S2 units <18pts gain FD+8"',
+  },
+  {
+    key: "defensive_measures",
+    label: "Defensive Measures",
+    cost: 4,
+    description: "2 S2 units <20pts gain Mines + Minelayer",
+  },
+];
+
+export default function ChapterPage({
+  params,
+}: {
+  params: Promise<{ campaignId: string; chapterNum: string }>;
+}) {
+  const { campaignId, chapterNum } = use(params);
+  const chapterNumber = parseInt(chapterNum);
+
+  // Data state
+  const [campaign, setCampaign] = useState<Campaign | null>(null);
+  const [chapter, setChapter] = useState<Chapter | null>(null);
+  const [existingResult, setExistingResult] = useState<GameResult | null>(null);
+  const [purchasedCEB, setPurchasedCEB] = useState<Record<string, number[]>>({});
+  const [commanderLevel, setCommanderLevel] = useState(0);
+  const [specOps, setSpecOps] = useState<SpecOps[]>([]);
+  const [purchasedConsumables, setPurchasedConsumables] = useState<ConsumableType[]>([]);
+  const [xpSummary, setXpSummary] = useState({ total: 0, spent: 0, available: 0 });
+  const [matchInfo, setMatchInfo] = useState<{
+    status: string;
+    yourTeam: { name: string; player1: string; player2: string; faction1: string | null; faction2: string | null };
+    opponentTeam: { name: string; player1: string; player2: string; faction1: string | null; faction2: string | null };
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // After-Action Report state
+  const [objectivePoints, setObjectivePoints] = useState(0);
+  const [result, setResult] = useState<GameResultType>("win");
+  const [armySurvived, setArmySurvived] = useState(50);
+  const [enemySurvived, setEnemySurvived] = useState(50);
+  const [promotionRoll, setPromotionRoll] = useState<number | null>(null);
+
+  // UI state
+  const { toast } = useToast();
+  const [submitting, setSubmitting] = useState(false);
+
+  async function loadData() {
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // Load campaign, chapter, and player data in parallel
+    const [
+      { data: camp },
+      { data: chap },
+      { data: ceb },
+      { data: promo },
+      { data: specs },
+    ] = await Promise.all([
+      supabase.from("campaigns").select("*").eq("id", campaignId).single(),
+      supabase
+        .from("chapters")
+        .select("*")
+        .eq("campaign_id", campaignId)
+        .eq("chapter_number", chapterNumber)
+        .single(),
+      supabase
+        .from("command_experience")
+        .select("*")
+        .eq("player_id", user.id)
+        .eq("campaign_id", campaignId)
+        .order("column_type")
+        .order("level"),
+      supabase
+        .from("commander_promotions")
+        .select("*")
+        .eq("player_id", user.id)
+        .eq("campaign_id", campaignId)
+        .single(),
+      supabase
+        .from("spec_ops")
+        .select("*")
+        .eq("player_id", user.id)
+        .eq("campaign_id", campaignId)
+        .order("created_at"),
+    ]);
+
+    setCampaign(camp as Campaign | null);
+    setChapter(chap as Chapter | null);
+    setCommanderLevel(
+      (promo as CommanderPromotion | null)?.current_level ?? 0
+    );
+    setSpecOps((specs as SpecOps[]) ?? []);
+
+    // Build CEB map
+    const cebMap: Record<string, number[]> = {};
+    for (const entry of (ceb as CommandExperience[]) ?? []) {
+      if (!cebMap[entry.column_type]) cebMap[entry.column_type] = [];
+      cebMap[entry.column_type].push(entry.level);
+    }
+    setPurchasedCEB(cebMap);
+
+    // Load chapter-specific data if chapter found
+    if (chap) {
+      const chapData = chap as Chapter;
+      const [{ data: gameResult }, { data: consumables }] = await Promise.all([
+        supabase
+          .from("game_results")
+          .select("*")
+          .eq("player_id", user.id)
+          .eq("chapter_id", chapData.id)
+          .limit(1)
+          .single(),
+        supabase
+          .from("consumables")
+          .select("*")
+          .eq("player_id", user.id)
+          .eq("chapter_id", chapData.id),
+      ]);
+
+      setExistingResult(gameResult as GameResult | null);
+      setPurchasedConsumables(
+        ((consumables as Consumable[]) ?? []).map((c) => c.consumable_type)
+      );
+
+      // Load match info for this chapter
+      const { data: allMatches } = await supabase
+        .from("matches")
+        .select("*")
+        .eq("chapter_id", chapData.id);
+
+      if (allMatches && allMatches.length > 0) {
+        // Find player's strike team
+        const { data: playerTeams } = await supabase
+          .from("strike_teams")
+          .select("*, player1:players!strike_teams_player1_id_fkey(display_name, faction), player2:players!strike_teams_player2_id_fkey(display_name, faction)")
+          .eq("campaign_id", campaignId)
+          .or(`player1_id.eq.${user.id},player2_id.eq.${user.id}`);
+
+        if (playerTeams && playerTeams.length > 0) {
+          const myTeam = playerTeams[0];
+          const myMatch = allMatches.find(
+            (m: { strike_team_1_id: string; strike_team_2_id: string }) =>
+              m.strike_team_1_id === myTeam.id || m.strike_team_2_id === myTeam.id
+          );
+
+          if (myMatch) {
+            const opponentTeamId = myMatch.strike_team_1_id === myTeam.id
+              ? myMatch.strike_team_2_id
+              : myMatch.strike_team_1_id;
+
+            const { data: oppTeam } = await supabase
+              .from("strike_teams")
+              .select("*, player1:players!strike_teams_player1_id_fkey(display_name, faction), player2:players!strike_teams_player2_id_fkey(display_name, faction)")
+              .eq("id", opponentTeamId)
+              .single();
+
+            const p1 = myTeam.player1 as unknown as { display_name: string; faction: string | null } | null;
+            const p2 = myTeam.player2 as unknown as { display_name: string; faction: string | null } | null;
+            const o1 = oppTeam?.player1 as unknown as { display_name: string; faction: string | null } | null;
+            const o2 = oppTeam?.player2 as unknown as { display_name: string; faction: string | null } | null;
+
+            setMatchInfo({
+              status: myMatch.status,
+              yourTeam: {
+                name: myTeam.name,
+                player1: p1?.display_name ?? "Unknown",
+                player2: p2?.display_name ?? "Unknown",
+                faction1: p1?.faction ?? null,
+                faction2: p2?.faction ?? null,
+              },
+              opponentTeam: {
+                name: oppTeam?.name ?? "Unknown",
+                player1: o1?.display_name ?? "Unknown",
+                player2: o2?.display_name ?? "Unknown",
+                faction1: o1?.faction ?? null,
+                faction2: o2?.faction ?? null,
+              },
+            });
+          }
+        }
+      }
+
+      // If there's an existing result, pre-fill the form with it
+      if (gameResult) {
+        const gr = gameResult as GameResult;
+        setObjectivePoints(gr.objective_points);
+        setResult(gr.result);
+        setArmySurvived(gr.army_percentage_survived ?? 50);
+        setEnemySurvived(gr.enemy_percentage_survived ?? 50);
+      }
+    }
+
+    // Load XP summary
+    const { data: ledger } = await supabase
+      .from("xp_ledger")
+      .select("amount")
+      .eq("player_id", user.id)
+      .eq("campaign_id", campaignId);
+
+    const entries = (ledger ?? []) as { amount: number }[];
+    const totalEarned = entries
+      .filter((e) => e.amount > 0)
+      .reduce((sum, e) => sum + e.amount, 0);
+    const totalSpent = Math.abs(
+      entries
+        .filter((e) => e.amount < 0)
+        .reduce((sum, e) => sum + e.amount, 0)
+    );
+    setXpSummary({
+      total: totalEarned,
+      spent: totalSpent,
+      available: totalEarned - totalSpent,
+    });
+
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadData();
+  }, [campaignId, chapterNumber]);
+
+  const activationLimits = getCebActivationLimits(commanderLevel);
+
+  const xpEarned = useMemo(
+    () => calculateGameXP(objectivePoints, result),
+    [objectivePoints, result]
+  );
+
+  const promotionCalc = useMemo(
+    () =>
+      calculatePromotionTN({
+        result,
+        objectivePoints,
+        armyPercentageSurvived: armySurvived,
+        enemyPercentageSurvived: enemySurvived,
+        currentLevel: commanderLevel,
+      }),
+    [result, objectivePoints, armySurvived, enemySurvived, commanderLevel]
+  );
+
+  const promotionSuccess =
+    promotionRoll !== null
+      ? isPromotionSuccess(promotionRoll, promotionCalc.targetNumber)
+      : null;
+
+  async function handleSubmitReport() {
+    if (!chapter) return;
+    setSubmitting(true);
+
+    const formData = new FormData();
+    formData.set("chapterId", chapter.id);
+    formData.set("campaignId", campaignId);
+    formData.set("objectivePoints", objectivePoints.toString());
+    formData.set("result", result);
+    formData.set("armySurvived", armySurvived.toString());
+    formData.set("enemySurvived", enemySurvived.toString());
+
+    const res = await submitAfterActionReport(formData);
+    setSubmitting(false);
+
+    if (res.error) {
+      toast(res.error, "error");
+    } else {
+      toast("After-action report submitted!");
+
+      // If promotion roll was made, submit it too
+      if (promotionRoll !== null) {
+        const promoForm = new FormData();
+        promoForm.set("chapterId", chapter.id);
+        promoForm.set("campaignId", campaignId);
+        promoForm.set("roll", promotionRoll.toString());
+        promoForm.set("targetNumber", promotionCalc.targetNumber.toString());
+        await submitPromotionRoll(promoForm);
+      }
+
+      loadData();
+    }
+  }
+
+  async function handlePurchaseCEB(columnType: string, level: number) {
+    if (!chapter) return;
+
+    const xpCost = CEB_LEVEL_COSTS[level];
+    const formData = new FormData();
+    formData.set("campaignId", campaignId);
+    formData.set("columnType", columnType);
+    formData.set("level", level.toString());
+    formData.set("xpCost", xpCost.toString());
+    formData.set("chapterNumber", chapterNumber.toString());
+    formData.set("chapterId", chapter.id);
+
+    const res = await purchaseCebLevel(formData);
+    if (res.error) {
+      toast(res.error, "error");
+    } else {
+      toast(`Purchased ${columnType.replace(/_/g, " ")} L${level}`);
+      loadData();
+    }
+  }
+
+  async function handlePurchaseConsumable(
+    consumableType: ConsumableType,
+    cost: number
+  ) {
+    if (!chapter) return;
+
+    const formData = new FormData();
+    formData.set("campaignId", campaignId);
+    formData.set("chapterId", chapter.id);
+    formData.set("consumableType", consumableType);
+    formData.set("xpCost", cost.toString());
+
+    const res = await purchaseConsumable(formData);
+    if (res.error) {
+      toast(res.error, "error");
+    } else {
+      toast(`Purchased ${consumableType.replace(/_/g, " ")}`);
+      loadData();
+    }
+  }
+
+  const resultOptions: {
+    value: GameResultType;
+    label: string;
+    color: string;
+  }[] = [
+    {
+      value: "win",
+      label: "VICTORY",
+      color: "text-green border-green-dim bg-green/10",
+    },
+    {
+      value: "draw",
+      label: "DRAW",
+      color: "text-amber border-amber-dim bg-amber/10",
+    },
+    {
+      value: "lose",
+      label: "DEFEAT",
+      color: "text-red border-red-dim bg-red/10",
+    },
+  ];
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="w-2 h-2 bg-cyan rounded-full status-dot" />
+        <span className="font-[family-name:var(--font-mono)] text-sm text-text-secondary ml-3">
+          Loading chapter data...
+        </span>
+      </div>
+    );
+  }
+
+  if (!campaign || !chapter) {
+    return (
+      <div className="panel p-8 text-center">
+        <p className="font-[family-name:var(--font-mono)] text-sm text-red">
+          Chapter not found.
+        </p>
+        <Link
+          href={`/dashboard/campaigns/${campaignId}`}
+          className="inline-block mt-4 px-4 py-2 border border-border text-text-secondary hover:text-cyan hover:border-cyan-dim font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+        >
+          Back to Campaign
+        </Link>
+      </div>
+    );
+  }
+
+  const hasSubmitted = existingResult !== null;
+
+  return (
+    <div style={{ animation: "slide-up 0.5s ease-out" }} className="pb-24">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-3">
+          <div className="w-1 h-8 bg-green" />
+          <div>
+            <h1 className="font-[family-name:var(--font-orbitron)] text-base sm:text-xl tracking-[0.15em] text-text-primary">
+              CHAPTER {chapterNumber} — {chapter.name.toUpperCase()}
+            </h1>
+            <p className="font-[family-name:var(--font-mono)] text-xs sm:text-sm text-text-secondary tracking-wider mt-0.5">
+              AFTER-ACTION REPORT & CAMPAIGN SHEET //{" "}
+              {campaign.name.toUpperCase()}
+            </p>
+          </div>
+        </div>
+        <Link
+          href={`/dashboard/campaigns/${campaignId}`}
+          className="px-4 py-2 border border-border text-text-secondary hover:text-cyan hover:border-cyan-dim font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+        >
+          Back
+        </Link>
+      </div>
+
+      {/* Match-up card */}
+      {matchInfo && (
+        <div className="panel panel-glow p-4 sm:p-5 mb-8 border-amber-dim/40">
+          <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
+            <div className="w-1 h-5 bg-amber" />
+            <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">
+              Your Match
+            </h2>
+            <span className={`ml-auto inline-flex items-center px-2 py-0.5 border font-[family-name:var(--font-mono)] text-[10px] tracking-wider uppercase ${
+              matchInfo.status === "completed"
+                ? "border-cyan-dim/30 text-cyan"
+                : matchInfo.status === "in_progress"
+                  ? "border-green-dim/30 text-green"
+                  : "border-amber-dim/30 text-amber"
+            }`}>
+              {matchInfo.status.replace("_", " ")}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-[1fr_auto_1fr] gap-4 items-center">
+            {/* Your team */}
+            <div className="p-3 bg-surface/30 border border-cyan-dim/20">
+              <div className="font-[family-name:var(--font-orbitron)] text-xs tracking-wider text-cyan mb-2">
+                {matchInfo.yourTeam.name.toUpperCase()}
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 bg-cyan rounded-full shrink-0" />
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-primary">{matchInfo.yourTeam.player1}</span>
+                  {matchInfo.yourTeam.faction1 && (
+                    <span className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted">{matchInfo.yourTeam.faction1}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 bg-cyan rounded-full shrink-0" />
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-primary">{matchInfo.yourTeam.player2}</span>
+                  {matchInfo.yourTeam.faction2 && (
+                    <span className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted">{matchInfo.yourTeam.faction2}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* VS */}
+            <div className="text-center">
+              <span className="font-[family-name:var(--font-orbitron)] text-lg text-text-muted tracking-wider">VS</span>
+            </div>
+
+            {/* Opponent team */}
+            <div className="p-3 bg-surface/30 border border-red-dim/20">
+              <div className="font-[family-name:var(--font-orbitron)] text-xs tracking-wider text-red mb-2">
+                {matchInfo.opponentTeam.name.toUpperCase()}
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 bg-red rounded-full shrink-0" />
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-primary">{matchInfo.opponentTeam.player1}</span>
+                  {matchInfo.opponentTeam.faction1 && (
+                    <span className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted">{matchInfo.opponentTeam.faction1}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 bg-red rounded-full shrink-0" />
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-primary">{matchInfo.opponentTeam.player2}</span>
+                  {matchInfo.opponentTeam.faction2 && (
+                    <span className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted">{matchInfo.opponentTeam.faction2}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!matchInfo && !loading && (
+        <div className="mb-8 px-4 py-3 bg-surface/30 border border-border/30 font-[family-name:var(--font-mono)] text-xs text-text-muted">
+          No match scheduled for you in this chapter yet.
+        </div>
+      )}
+
+      {/* Already submitted notice */}
+      {hasSubmitted && (
+        <div className="mb-6 px-4 py-3 bg-cyan/10 border border-cyan-dim/30 font-[family-name:var(--font-mono)] text-sm text-cyan">
+          After-action report already submitted for this chapter. Result:{" "}
+          <span className="uppercase font-bold">{existingResult.result}</span>{" "}
+          — {existingResult.objective_points} OP,{" "}
+          {existingResult.tournament_points} TP, {existingResult.xp_earned} XP
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════ */}
+      {/* SECTION: AFTER-ACTION REPORT                           */}
+      {/* ═══════════════════════════════════════════════════════ */}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 mb-8">
+        {/* Game Result Form */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Result Selection */}
+          <div
+            className={`panel panel-glow p-4 sm:p-5 border-cyan-dim/40 ${hasSubmitted ? "opacity-60 pointer-events-none" : ""}`}
+          >
+            <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
+              <div className="w-1 h-5 bg-cyan" />
+              <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">
+                Game Outcome
+              </h2>
+              <span className="ml-auto font-[family-name:var(--font-mono)] text-xs text-cyan tracking-wider">
+                STEP 1
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-6">
+              {resultOptions.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setResult(opt.value)}
+                  className={`py-2.5 sm:py-3 border font-[family-name:var(--font-orbitron)] text-xs sm:text-sm tracking-wider transition-all cursor-pointer ${
+                    result === opt.value
+                      ? opt.color
+                      : "border-border text-text-muted hover:border-border-bright hover:text-text-secondary"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Objective Points */}
+            <div className="mb-6">
+              <label className="data-label font-[family-name:var(--font-mono)] block mb-3">
+                OBJECTIVE POINTS (0-10)
+              </label>
+              <div className="flex flex-wrap items-center gap-1">
+                {Array.from({ length: 11 }).map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setObjectivePoints(i)}
+                    className={`w-8 h-8 sm:w-10 sm:h-10 border font-[family-name:var(--font-mono)] text-xs sm:text-sm transition-all cursor-pointer ${
+                      i <= objectivePoints
+                        ? "bg-cyan/15 border-cyan-dim/40 text-cyan"
+                        : "border-border text-text-muted hover:border-border-bright hover:text-text-secondary"
+                    }`}
+                  >
+                    {i}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Survival percentages */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div>
+                <label className="data-label font-[family-name:var(--font-mono)] block mb-2">
+                  YOUR ARMY SURVIVED (%)
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="5"
+                    value={armySurvived}
+                    onChange={(e) => setArmySurvived(Number(e.target.value))}
+                    className="flex-1 accent-cyan"
+                  />
+                  <span className="font-[family-name:var(--font-mono)] text-sm text-text-primary w-12 text-right">
+                    {armySurvived}%
+                  </span>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-red">
+                    &lt;25% penalty
+                  </span>
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-green">
+                    &gt;75% bonus
+                  </span>
+                </div>
+              </div>
+              <div>
+                <label className="data-label font-[family-name:var(--font-mono)] block mb-2">
+                  ENEMY SURVIVED (%)
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="5"
+                    value={enemySurvived}
+                    onChange={(e) => setEnemySurvived(Number(e.target.value))}
+                    className="flex-1 accent-amber"
+                  />
+                  <span className="font-[family-name:var(--font-mono)] text-sm text-text-primary w-12 text-right">
+                    {enemySurvived}%
+                  </span>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-green">
+                    &le;25% bonus
+                  </span>
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-muted">
+                    &nbsp;
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Promotion Roll */}
+          <div
+            className={`panel p-4 sm:p-5 ${hasSubmitted ? "opacity-60 pointer-events-none" : ""}`}
+          >
+            <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
+              <div className="w-1 h-5 bg-amber" />
+              <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">
+                Commander Promotion Roll
+              </h2>
+              <span className="ml-auto font-[family-name:var(--font-mono)] text-xs text-amber tracking-wider">
+                STEP 2
+              </span>
+            </div>
+
+            {/* TN Breakdown */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+              <div className="space-y-2">
+                <div className="data-label font-[family-name:var(--font-mono)]">
+                  MODIFIERS
+                </div>
+                {Object.entries(promotionCalc.modifiers).map(([key, value]) => (
+                  <div
+                    key={key}
+                    className="flex items-center justify-between px-3 py-1.5 bg-surface/50 border border-border/30"
+                  >
+                    <span className="font-[family-name:var(--font-mono)] text-xs text-text-secondary capitalize">
+                      {key.replace(/_/g, " ")}
+                    </span>
+                    <span
+                      className={`font-[family-name:var(--font-mono)] text-xs font-bold ${value >= 0 ? "text-green" : "text-red"}`}
+                    >
+                      {value >= 0 ? "+" : ""}
+                      {value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-col items-center justify-center p-4 bg-surface/30 border border-amber-dim/30">
+                <div className="data-label font-[family-name:var(--font-mono)] mb-2">
+                  TARGET NUMBER
+                </div>
+                <div className="font-[family-name:var(--font-orbitron)] text-4xl sm:text-5xl font-bold text-amber">
+                  {promotionCalc.targetNumber}
+                </div>
+                <div className="font-[family-name:var(--font-mono)] text-xs text-text-secondary mt-2">
+                  ROLL D20 ≤ {promotionCalc.targetNumber}
+                </div>
+              </div>
+            </div>
+
+            {/* Roll input */}
+            <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+              <label className="data-label font-[family-name:var(--font-mono)] shrink-0">
+                YOUR ROLL:
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={promotionRoll ?? ""}
+                onChange={(e) =>
+                  setPromotionRoll(
+                    e.target.value ? Number(e.target.value) : null
+                  )
+                }
+                placeholder="1-20"
+                className="w-24 font-[family-name:var(--font-mono)] text-center text-lg"
+              />
+              {promotionSuccess !== null && (
+                <div
+                  className={`flex-1 px-4 py-2 border font-[family-name:var(--font-orbitron)] text-sm tracking-wider text-center ${
+                    promotionSuccess
+                      ? "bg-green/10 border-green-dim text-green"
+                      : "bg-red/10 border-red-dim text-red"
+                  }`}
+                >
+                  {promotionSuccess ? "PROMOTED!" : "FAILED"}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Live calculation sidebar */}
+        <div className="space-y-4">
+          <div className="panel panel-glow p-4 sm:p-5 lg:sticky lg:top-8">
+            <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
+              <div className="w-1 h-5 bg-cyan" />
+              <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">
+                Live Calculations
+              </h2>
+            </div>
+
+            <div className="space-y-4">
+              {/* XP earned */}
+              <div>
+                <div className="data-label font-[family-name:var(--font-mono)] mb-1">
+                  XP EARNED
+                </div>
+                <div className="font-[family-name:var(--font-mono)] text-2xl sm:text-3xl font-bold text-cyan">
+                  {xpEarned}
+                </div>
+                <div className="font-[family-name:var(--font-mono)] text-xs text-text-secondary mt-1">
+                  {objectivePoints} OP{result === "win" ? " + 1 WIN BONUS" : ""}
+                </div>
+              </div>
+
+              <div className="h-px bg-border" />
+
+              {/* Tournament points */}
+              <div>
+                <div className="data-label font-[family-name:var(--font-mono)] mb-1">
+                  TOURNAMENT POINTS
+                </div>
+                <div
+                  className={`font-[family-name:var(--font-mono)] text-2xl sm:text-3xl font-bold ${
+                    result === "win"
+                      ? "text-green"
+                      : result === "draw"
+                        ? "text-amber"
+                        : "text-red"
+                  }`}
+                >
+                  {result === "win" ? 3 : result === "draw" ? 2 : 1}
+                </div>
+              </div>
+
+              <div className="h-px bg-border" />
+
+              {/* Promotion TN */}
+              <div>
+                <div className="data-label font-[family-name:var(--font-mono)] mb-1">
+                  PROMOTION TN
+                </div>
+                <div className="font-[family-name:var(--font-mono)] text-2xl sm:text-3xl font-bold text-amber">
+                  {promotionCalc.targetNumber}+
+                </div>
+                <div className="font-[family-name:var(--font-mono)] text-xs text-text-secondary mt-1">
+                  on D20
+                </div>
+              </div>
+
+              <div className="h-px bg-border" />
+
+              {/* Game summary */}
+              <div className="space-y-2">
+                <div className="data-label font-[family-name:var(--font-mono)]">
+                  SUMMARY
+                </div>
+                <div className="flex justify-between px-2 py-1">
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-muted">
+                    Result
+                  </span>
+                  <span
+                    className={`font-[family-name:var(--font-orbitron)] text-xs uppercase ${
+                      result === "win"
+                        ? "text-green"
+                        : result === "draw"
+                          ? "text-amber"
+                          : "text-red"
+                    }`}
+                  >
+                    {result}
+                  </span>
+                </div>
+                <div className="flex justify-between px-2 py-1">
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-muted">
+                    Obj. Points
+                  </span>
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-primary">
+                    {objectivePoints}
+                  </span>
+                </div>
+                <div className="flex justify-between px-2 py-1">
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-muted">
+                    Army Survived
+                  </span>
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-primary">
+                    {armySurvived}%
+                  </span>
+                </div>
+                <div className="flex justify-between px-2 py-1">
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-muted">
+                    Enemy Survived
+                  </span>
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-primary">
+                    {enemySurvived}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════ */}
+      {/* SECTION: CAMPAIGN SHEET                                */}
+      {/* ═══════════════════════════════════════════════════════ */}
+
+      {/* XP Summary Bar */}
+      <div className="panel panel-glow p-4 sm:p-5 mb-8">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-1 h-5 bg-cyan" />
+          <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">
+            Experience Points
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 sm:gap-6">
+          <div>
+            <div className="data-label font-[family-name:var(--font-mono)] mb-1">
+              TOTAL EARNED
+            </div>
+            <div className="font-[family-name:var(--font-mono)] text-2xl sm:text-3xl font-bold text-cyan">
+              {xpSummary.total}
+            </div>
+          </div>
+          <div>
+            <div className="data-label font-[family-name:var(--font-mono)] mb-1">
+              SPENT
+            </div>
+            <div className="font-[family-name:var(--font-mono)] text-2xl sm:text-3xl font-bold text-red">
+              {xpSummary.spent}
+            </div>
+          </div>
+          <div>
+            <div className="data-label font-[family-name:var(--font-mono)] mb-1">
+              AVAILABLE
+            </div>
+            <div className="font-[family-name:var(--font-mono)] text-2xl sm:text-3xl font-bold text-green">
+              {xpSummary.available}
+            </div>
+          </div>
+        </div>
+
+        {/* XP Bar */}
+        <div className="mt-4 pt-3 border-t border-border/50">
+          <div className="h-2 bg-surface-bright relative overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-cyan to-cyan-dim absolute left-0 top-0"
+              style={{
+                width: `${Math.min((xpSummary.spent / 78) * 100, 100)}%`,
+              }}
+            />
+            <div
+              className="h-full bg-green/30 absolute top-0"
+              style={{
+                left: `${Math.min((xpSummary.spent / 78) * 100, 100)}%`,
+                width: `${Math.min((xpSummary.available / 78) * 100, 100)}%`,
+              }}
+            />
+          </div>
+          <div className="flex justify-between mt-1">
+            <span className="font-[family-name:var(--font-mono)] text-xs text-text-muted">
+              0
+            </span>
+            <span className="font-[family-name:var(--font-mono)] text-xs text-text-muted">
+              78 MAX
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* CEB Grid */}
+      <div className="panel p-4 sm:p-5 mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-1 h-5 bg-amber" />
+            <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">
+              Command Experience Board
+            </h2>
+          </div>
+          <div className="font-[family-name:var(--font-mono)] text-xs text-text-secondary sm:text-right pl-4 sm:pl-0">
+            ACTIVATION: {activationLimits.maxBonusesPerColumn} per column /{" "}
+            {activationLimits.maxColumns} columns
+          </div>
+        </div>
+
+        {/* Grid */}
+        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+          <div className="grid grid-cols-6 gap-1.5 sm:gap-2 min-w-[600px]">
+            {/* Column headers */}
+            {CEB_COLUMNS.map((col) => (
+              <div
+                key={col.key}
+                className="text-center pb-2 border-b border-border mb-2"
+              >
+                <div className="font-[family-name:var(--font-orbitron)] text-xs tracking-wider text-text-primary">
+                  {col.shortLabel}
+                </div>
+                <div className="font-[family-name:var(--font-mono)] text-[11px] text-text-secondary mt-0.5">
+                  {col.label}
+                </div>
+              </div>
+            ))}
+
+            {/* Level rows 1-4 (per column) */}
+            {[1, 2, 3, 4].map((level) =>
+              CEB_COLUMNS.map((col) => {
+                const isPurchased = purchasedCEB[col.key]?.includes(level);
+                const previousOwned =
+                  level === 1 || purchasedCEB[col.key]?.includes(level - 1);
+                const canPurchase =
+                  !isPurchased &&
+                  previousOwned &&
+                  xpSummary.available >= CEB_LEVEL_COSTS[level];
+                const levelDesc = col.levels[level - 1];
+
+                return (
+                  <button
+                    key={`${col.key}-${level}`}
+                    disabled={!canPurchase}
+                    onClick={() =>
+                      canPurchase && handlePurchaseCEB(col.key, level)
+                    }
+                    className={`
+                      relative p-2 sm:p-2.5 border text-left transition-all duration-200 min-h-[60px] sm:min-h-[72px] cursor-pointer
+                      ${
+                        isPurchased
+                          ? "bg-cyan/15 border-cyan-dim/40 hover:border-cyan"
+                          : canPurchase
+                            ? "bg-surface/50 border-border hover:border-amber-dim hover:bg-amber/5"
+                            : "bg-surface/20 border-border/30 opacity-40 cursor-not-allowed"
+                      }
+                    `}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span
+                        className={`font-[family-name:var(--font-mono)] text-xs font-bold ${isPurchased ? "text-cyan" : "text-text-muted"}`}
+                      >
+                        L{level}
+                      </span>
+                      <span
+                        className={`font-[family-name:var(--font-mono)] text-xs ${isPurchased ? "text-cyan-dim" : "text-text-muted"}`}
+                      >
+                        {CEB_LEVEL_COSTS[level]} XP
+                      </span>
+                    </div>
+                    <div
+                      className={`font-[family-name:var(--font-mono)] text-[11px] leading-snug ${isPurchased ? "text-text-primary" : "text-text-secondary"}`}
+                    >
+                      {levelDesc}
+                    </div>
+
+                    {isPurchased && (
+                      <div className="absolute top-1 right-1 w-4 h-4 bg-cyan flex items-center justify-center">
+                        <svg
+                          className="w-2.5 h-2.5 text-void"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={3}
+                        >
+                          <path
+                            strokeLinecap="square"
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
+                      </div>
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          {/* Level 5 — shared across all columns */}
+          {(() => {
+            const anyL5Purchased = CEB_COLUMNS.some((col) => purchasedCEB[col.key]?.includes(5));
+            const anyColumnHasL4 = CEB_COLUMNS.some((col) => purchasedCEB[col.key]?.includes(4));
+            const canPurchaseL5 = !anyL5Purchased && anyColumnHasL4 && xpSummary.available >= CEB_LEVEL_COSTS[5];
+
+            return (
+              <button
+                disabled={!canPurchaseL5}
+                onClick={() => {
+                  if (canPurchaseL5) {
+                    const colWithL4 = CEB_COLUMNS.find((col) => purchasedCEB[col.key]?.includes(4));
+                    if (colWithL4) handlePurchaseCEB(colWithL4.key, 5);
+                  }
+                }}
+                className={`
+                  mt-2 w-full relative p-3 sm:p-4 border text-center transition-all duration-200 cursor-pointer
+                  ${
+                    anyL5Purchased
+                      ? "bg-cyan/15 border-cyan-dim/40 hover:border-cyan"
+                      : canPurchaseL5
+                        ? "bg-surface/50 border-border hover:border-amber-dim hover:bg-amber/5"
+                        : "bg-surface/20 border-border/30 opacity-40 cursor-not-allowed"
+                  }
+                `}
+              >
+                <div className="flex items-center justify-center gap-4 mb-1">
+                  <span className={`font-[family-name:var(--font-mono)] text-xs font-bold ${anyL5Purchased ? "text-cyan" : "text-text-muted"}`}>
+                    L5
+                  </span>
+                  <span className={`font-[family-name:var(--font-mono)] text-xs ${anyL5Purchased ? "text-cyan-dim" : "text-text-muted"}`}>
+                    {CEB_LEVEL_COSTS[5]} XP
+                  </span>
+                </div>
+                <div className={`font-[family-name:var(--font-mono)] text-xs leading-snug ${anyL5Purchased ? "text-text-primary" : "text-text-secondary"}`}>
+                  Enemy must ID their Lieutenant during deployment &bull; +15 Army Points
+                </div>
+                {anyL5Purchased && (
+                  <div className="absolute top-2 right-2 w-4 h-4 bg-cyan flex items-center justify-center">
+                    <svg className="w-2.5 h-2.5 text-void" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="square" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                )}
+              </button>
+            );
+          })()}
+        </div>
+
+        {/* Commander Promotion — inline with CEB */}
+        <div className="mt-6 pt-5 border-t border-border">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-1 h-5 bg-amber" />
+            <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">
+              Commander Promotion
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-[auto_1fr] gap-6 items-start">
+            {/* Level display + progress */}
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 bg-surface-bright border-2 border-amber-dim flex items-center justify-center">
+                <span className="font-[family-name:var(--font-orbitron)] text-2xl font-bold text-amber">
+                  {commanderLevel}
+                </span>
+              </div>
+              <div>
+                <div className="font-[family-name:var(--font-orbitron)] text-sm text-text-primary tracking-wider">
+                  LEVEL {commanderLevel}
+                </div>
+                <div className="font-[family-name:var(--font-mono)] text-xs text-text-secondary mt-1">
+                  COMMANDER RANK
+                </div>
+                <div className="flex gap-1 mt-2 w-32">
+                  {[0, 1, 2, 3, 4, 5].map((lvl) => (
+                    <div
+                      key={lvl}
+                      className={`flex-1 h-1.5 ${
+                        lvl <= commanderLevel ? "bg-amber" : "bg-surface-bright"
+                      } transition-colors`}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Benefits */}
+            <div className="flex flex-wrap gap-2">
+              {PROMOTION_BENEFITS[commanderLevel]?.map((benefit, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-2 px-3 py-2 bg-surface/50 border border-border/30"
+                >
+                  <div className="w-1 h-4 bg-amber" />
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-primary">
+                    {benefit}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 mb-8">
+        {/* Spec-Ops */}
+        <div className="panel p-4 sm:p-5">
+          <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
+            <div className="w-1 h-5 bg-green" />
+            <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">
+              Spec-Ops Unit
+            </h2>
+          </div>
+
+          {specOps.length > 0 ? (
+            specOps.map((so) => (
+              <div key={so.id}>
+                <div className="flex items-center gap-4 mb-5">
+                  <div className="w-16 h-16 bg-surface-bright border border-green-dim flex items-center justify-center">
+                    <svg
+                      className="w-8 h-8 text-green-dim"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={1}
+                    >
+                      <path
+                        strokeLinecap="square"
+                        d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="font-[family-name:var(--font-orbitron)] text-sm text-text-primary tracking-wider">
+                      {so.unit_name.toUpperCase()}
+                    </div>
+                    <div className="font-[family-name:var(--font-mono)] text-xs text-text-secondary mt-1">
+                      {so.total_xp_spent} XP INVESTED
+                    </div>
+                  </div>
+                </div>
+
+                {/* Upgrades */}
+                {so.upgrades && so.upgrades.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="data-label font-[family-name:var(--font-mono)] mb-2">
+                      UPGRADES
+                    </div>
+                    {so.upgrades.map((upgrade, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between px-3 py-2 bg-surface/50 border border-border/30"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-[family-name:var(--font-mono)] text-xs text-text-secondary uppercase px-1.5 py-0.5 bg-surface-bright border border-border">
+                            {upgrade.type}
+                          </span>
+                          <span className="font-[family-name:var(--font-mono)] text-sm text-text-primary">
+                            {upgrade.name}
+                          </span>
+                        </div>
+                        <span className="font-[family-name:var(--font-mono)] text-sm text-green">
+                          {upgrade.xp_cost} XP
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))
+          ) : (
+            <div className="text-center py-6">
+              <p className="font-[family-name:var(--font-mono)] text-xs text-text-muted">
+                No Spec-Ops unit created yet.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Empty right column placeholder */}
+        <div />
+      </div>
+
+      {/* Consumables */}
+      <div className="panel p-4 sm:p-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 mb-4 pb-3 border-b border-border">
+          <div className="flex items-center gap-3">
+            <div className="w-1 h-5 bg-red" />
+            <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">
+              Consumables — Chapter {chapterNumber}
+            </h2>
+          </div>
+          <span className="font-[family-name:var(--font-mono)] text-xs text-text-secondary sm:ml-auto pl-4 sm:pl-0">
+            SINGLE USE / EXPIRES END OF CHAPTER
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+          {CONSUMABLE_DEFS.map((consumable) => {
+            const isPurchased = purchasedConsumables.includes(consumable.key);
+            const canAfford = xpSummary.available >= consumable.cost;
+            return (
+              <button
+                key={consumable.key}
+                disabled={isPurchased || !canAfford}
+                onClick={() =>
+                  !isPurchased &&
+                  canAfford &&
+                  handlePurchaseConsumable(consumable.key, consumable.cost)
+                }
+                className={`p-3 sm:p-4 border text-left transition-all duration-200 cursor-pointer ${
+                  isPurchased
+                    ? "bg-red/10 border-red-dim/40"
+                    : canAfford
+                      ? "bg-surface/30 border-border/50 hover:border-amber-dim hover:bg-amber/5"
+                      : "bg-surface/20 border-border/30 opacity-40 cursor-not-allowed"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span
+                    className={`font-[family-name:var(--font-orbitron)] text-xs tracking-wider ${isPurchased ? "text-red" : "text-text-primary"}`}
+                  >
+                    {consumable.label.toUpperCase()}
+                  </span>
+                  <span
+                    className={`font-[family-name:var(--font-mono)] text-xs font-bold ${isPurchased ? "text-red-dim" : "text-amber"}`}
+                  >
+                    {consumable.cost} XP
+                  </span>
+                </div>
+                <div
+                  className={`font-[family-name:var(--font-mono)] text-xs leading-relaxed ${isPurchased ? "text-text-muted" : "text-text-secondary"}`}
+                >
+                  {consumable.description}
+                </div>
+                {isPurchased && (
+                  <div className="mt-2 inline-flex items-center gap-1 px-2 py-1 bg-red-dim/20 border border-red-dim/30">
+                    <span className="font-[family-name:var(--font-mono)] text-xs text-red tracking-wider uppercase">
+                      PURCHASED
+                    </span>
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Sticky Submit Bar */}
+      {!hasSubmitted && (
+        <div className="fixed bottom-0 left-0 right-0 md:left-64 z-30 bg-void/95 backdrop-blur-sm border-t border-cyan-dim/40">
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-4">
+            <div className="hidden sm:flex items-center gap-4 font-[family-name:var(--font-mono)] text-xs">
+              <span
+                className={`${result === "win" ? "text-green" : result === "draw" ? "text-amber" : "text-red"}`}
+              >
+                {result.toUpperCase()}
+              </span>
+              <span className="text-border">|</span>
+              <span className="text-cyan">{objectivePoints} OP</span>
+              <span className="text-border">|</span>
+              <span className="text-text-secondary">{xpEarned} XP</span>
+              {promotionRoll !== null && (
+                <>
+                  <span className="text-border">|</span>
+                  <span
+                    className={
+                      promotionSuccess ? "text-green" : "text-red"
+                    }
+                  >
+                    {promotionSuccess ? "PROMOTED" : "NO PROMO"}
+                  </span>
+                </>
+              )}
+            </div>
+            <button
+              onClick={handleSubmitReport}
+              disabled={submitting}
+              className="w-full sm:w-auto px-8 py-3 bg-cyan/20 border-2 border-cyan text-cyan font-[family-name:var(--font-orbitron)] text-sm sm:text-base tracking-[0.2em] uppercase hover:bg-cyan/30 hover:shadow-[0_0_24px_rgba(0,229,255,0.25)] transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
+            >
+              {submitting ? "SUBMITTING..." : "SUBMIT AFTER-ACTION REPORT"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
