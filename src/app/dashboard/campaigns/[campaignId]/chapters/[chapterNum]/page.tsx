@@ -9,6 +9,7 @@ import {
   submitPromotionRoll,
   purchaseCebLevel,
   purchaseConsumable,
+  addSpecOpsSkill,
 } from "../../../actions";
 import {
   calculateGameXP,
@@ -180,6 +181,11 @@ export default function ChapterPage({
   const [armySurvived, setArmySurvived] = useState(50);
   const [enemySurvived, setEnemySurvived] = useState(50);
   const [promotionRoll, setPromotionRoll] = useState<number | null>(null);
+
+  // Spec-Ops form state
+  const [showAddSkill, setShowAddSkill] = useState(false);
+  const [newSkillName, setNewSkillName] = useState("");
+  const [newSkillXpCost, setNewSkillXpCost] = useState(1);
 
   // UI state
   const { toast } = useToast();
@@ -459,6 +465,28 @@ export default function ChapterPage({
       toast(res.error, "error");
     } else {
       toast(`Purchased ${consumableType.replace(/_/g, " ")}`);
+      loadData();
+    }
+  }
+
+  async function handleAddSkill() {
+    if (!chapter || !newSkillName.trim()) return;
+
+    const formData = new FormData();
+    formData.set("campaignId", campaignId);
+    formData.set("chapterId", chapter.id);
+    formData.set("chapterNumber", chapterNumber.toString());
+    formData.set("skillName", newSkillName.trim());
+    formData.set("xpCost", newSkillXpCost.toString());
+
+    const res = await addSpecOpsSkill(formData);
+    if (res.error) {
+      toast(res.error, "error");
+    } else {
+      toast(`Added skill: ${newSkillName.trim()}`);
+      setNewSkillName("");
+      setNewSkillXpCost(1);
+      setShowAddSkill(false);
       loadData();
     }
   }
@@ -1217,83 +1245,105 @@ export default function ChapterPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 mb-8">
-        {/* Spec-Ops */}
-        <div className="panel p-4 sm:p-5">
-          <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
+      <div className="panel p-4 sm:p-5 mb-8">
+        <div className="flex items-center justify-between mb-4 pb-3 border-b border-border">
+          <div className="flex items-center gap-3">
             <div className="w-1 h-5 bg-green" />
             <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">
               Spec-Ops Unit
             </h2>
+            {specOps.length > 0 && (
+              <span className="font-[family-name:var(--font-mono)] text-xs text-text-secondary">
+                {specOps[0].total_xp_spent} XP INVESTED
+              </span>
+            )}
           </div>
-
-          {specOps.length > 0 ? (
-            specOps.map((so) => (
-              <div key={so.id}>
-                <div className="flex items-center gap-4 mb-5">
-                  <div className="w-16 h-16 bg-surface-bright border border-green-dim flex items-center justify-center">
-                    <svg
-                      className="w-8 h-8 text-green-dim"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={1}
-                    >
-                      <path
-                        strokeLinecap="square"
-                        d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"
-                      />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="font-[family-name:var(--font-orbitron)] text-sm text-text-primary tracking-wider">
-                      {so.unit_name.toUpperCase()}
-                    </div>
-                    <div className="font-[family-name:var(--font-mono)] text-xs text-text-secondary mt-1">
-                      {so.total_xp_spent} XP INVESTED
-                    </div>
-                  </div>
-                </div>
-
-                {/* Upgrades */}
-                {so.upgrades && so.upgrades.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="data-label font-[family-name:var(--font-mono)] mb-2">
-                      UPGRADES
-                    </div>
-                    {so.upgrades.map((upgrade, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between px-3 py-2 bg-surface/50 border border-border/30"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="font-[family-name:var(--font-mono)] text-xs text-text-secondary uppercase px-1.5 py-0.5 bg-surface-bright border border-border">
-                            {upgrade.type}
-                          </span>
-                          <span className="font-[family-name:var(--font-mono)] text-sm text-text-primary">
-                            {upgrade.name}
-                          </span>
-                        </div>
-                        <span className="font-[family-name:var(--font-mono)] text-sm text-green">
-                          {upgrade.xp_cost} XP
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))
-          ) : (
-            <div className="text-center py-6">
-              <p className="font-[family-name:var(--font-mono)] text-xs text-text-muted">
-                No Spec-Ops unit created yet.
-              </p>
-            </div>
+          {!showAddSkill && (
+            <button
+              onClick={() => setShowAddSkill(true)}
+              disabled={xpSummary.available < 1}
+              className="px-4 py-2 border border-green-dim text-green font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase hover:bg-green/10 hover:border-green transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              + ADD SKILL
+            </button>
           )}
         </div>
 
-        {/* Empty right column placeholder */}
-        <div />
+        {/* Add skill form */}
+        {showAddSkill && (
+          <div className="mb-4 p-4 bg-surface/50 border border-green-dim/30 space-y-3">
+            <div>
+              <label className="data-label font-[family-name:var(--font-mono)] block mb-1">SKILL NAME</label>
+              <input
+                type="text"
+                value={newSkillName}
+                onChange={(e) => setNewSkillName(e.target.value)}
+                placeholder="e.g. Mimetism -3"
+                className="w-full font-[family-name:var(--font-mono)] text-sm"
+              />
+            </div>
+            <div>
+              <label className="data-label font-[family-name:var(--font-mono)] block mb-1">XP COST</label>
+              <input
+                type="number"
+                min="1"
+                value={newSkillXpCost}
+                onChange={(e) => setNewSkillXpCost(Math.max(1, Number(e.target.value)))}
+                className="w-24 font-[family-name:var(--font-mono)] text-sm text-center"
+              />
+            </div>
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                onClick={handleAddSkill}
+                disabled={!newSkillName.trim() || xpSummary.available < newSkillXpCost}
+                className="px-6 py-2 bg-green/20 border border-green text-green font-[family-name:var(--font-orbitron)] text-xs tracking-wider uppercase hover:bg-green/30 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                SAVE
+              </button>
+              <button
+                onClick={() => { setShowAddSkill(false); setNewSkillName(""); setNewSkillXpCost(1); }}
+                className="px-4 py-2 border border-border text-text-muted font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase hover:text-text-secondary hover:border-border-bright transition-all cursor-pointer"
+              >
+                CANCEL
+              </button>
+              {xpSummary.available < newSkillXpCost && newSkillName.trim() && (
+                <span className="font-[family-name:var(--font-mono)] text-xs text-red">Not enough XP</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Existing skills */}
+        {specOps.length > 0 && specOps[0].upgrades && specOps[0].upgrades.length > 0 ? (
+          <div className="space-y-2">
+            {specOps[0].upgrades.map((upgrade, i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between px-3 py-2 bg-surface/50 border border-border/30"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-secondary uppercase px-1.5 py-0.5 bg-surface-bright border border-border">
+                    {upgrade.type}
+                  </span>
+                  <span className="font-[family-name:var(--font-mono)] text-sm text-text-primary">
+                    {upgrade.name}
+                  </span>
+                </div>
+                <span className="font-[family-name:var(--font-mono)] text-sm text-green">
+                  {upgrade.xp_cost} XP
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          !showAddSkill && (
+            <div className="text-center py-6">
+              <p className="font-[family-name:var(--font-mono)] text-xs text-text-muted">
+                No skills added yet. Click &quot;Add Skill&quot; to get started.
+              </p>
+            </div>
+          )
+        )}
       </div>
 
       {/* Consumables */}

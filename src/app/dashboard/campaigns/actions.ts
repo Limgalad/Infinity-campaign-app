@@ -33,8 +33,7 @@ export async function submitAfterActionReport(formData: FormData): Promise<{ suc
     return { error: "You already submitted a result for this chapter" };
   }
 
-  // Calculate TP and XP
-  const tp = result === "win" ? 3 : result === "draw" ? 2 : 1;
+  // Calculate XP (TP is computed by the DB)
   const xpEarned = Math.min(objectivePoints, 10) + (result === "win" ? 1 : 0);
 
   const { error } = await supabase.from("game_results").insert({
@@ -42,7 +41,6 @@ export async function submitAfterActionReport(formData: FormData): Promise<{ suc
     player_id: user.id,
     objective_points: objectivePoints,
     result,
-    tournament_points: tp,
     xp_earned: xpEarned,
     army_percentage_survived: isNaN(armySurvived) ? null : armySurvived,
     enemy_percentage_survived: isNaN(enemySurvived) ? null : enemySurvived,
@@ -173,6 +171,76 @@ export async function purchaseCebLevel(formData: FormData): Promise<{ success?: 
     source: "ceb_purchase",
     amount: -xpCost,
     description: `CEB: ${columnType} L${level}`,
+  });
+
+  revalidatePath(`/dashboard/campaigns/${campaignId}`);
+  return { success: true };
+}
+
+// ─── Spec-Ops Skill Purchase ──────────────────────────────
+
+export async function addSpecOpsSkill(formData: FormData): Promise<{ success?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const campaignId = formData.get("campaignId") as string;
+  const chapterId = formData.get("chapterId") as string;
+  const chapterNumber = parseInt(formData.get("chapterNumber") as string);
+  const skillName = (formData.get("skillName") as string)?.trim();
+  const xpCost = parseInt(formData.get("xpCost") as string);
+
+  if (!skillName) return { error: "Skill name is required" };
+  if (isNaN(xpCost) || xpCost < 1) return { error: "XP cost must be at least 1" };
+
+  // Get or create spec-ops unit for this player
+  const { data: existing } = await supabase
+    .from("spec_ops")
+    .select("*")
+    .eq("player_id", user.id)
+    .eq("campaign_id", campaignId)
+    .limit(1)
+    .single();
+
+  if (existing) {
+    // Add skill to existing spec-ops unit
+    const currentUpgrades = (existing.upgrades as { type: string; name: string; xp_cost: number; chapter_purchased: number }[]) ?? [];
+    const newUpgrade = { type: "skill", name: skillName, xp_cost: xpCost, chapter_purchased: chapterNumber };
+
+    const { error } = await supabase
+      .from("spec_ops")
+      .update({
+        upgrades: [...currentUpgrades, newUpgrade],
+        total_xp_spent: (existing.total_xp_spent ?? 0) + xpCost,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existing.id);
+
+    if (error) return { error: error.message };
+  } else {
+    // Create new spec-ops unit with this skill
+    const { error } = await supabase.from("spec_ops").insert({
+      player_id: user.id,
+      campaign_id: campaignId,
+      unit_name: "Spec-Ops Unit",
+      base_profile: {},
+      total_xp_spent: xpCost,
+      upgrades: [{ type: "skill", name: skillName, xp_cost: xpCost, chapter_purchased: chapterNumber }],
+    });
+
+    if (error) return { error: error.message };
+  }
+
+  // Deduct XP
+  await supabase.from("xp_ledger").insert({
+    player_id: user.id,
+    campaign_id: campaignId,
+    chapter_id: chapterId,
+    source: "specops_upgrade",
+    amount: -xpCost,
+    description: `Spec-Ops skill: ${skillName}`,
   });
 
   revalidatePath(`/dashboard/campaigns/${campaignId}`);
