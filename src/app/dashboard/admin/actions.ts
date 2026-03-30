@@ -368,11 +368,8 @@ export async function submitGameResult(formData: FormData) {
 
   if (!playerId || !result) return { error: "Player and result are required" };
 
-  // Calculate tournament points
-  const tp = result === "win" ? 3 : result === "draw" ? 2 : 1;
-
-  // Calculate XP: 1 per OP + win bonus
-  const xpEarned = objectivePoints + (result === "win" ? 1 : 0);
+  // Calculate XP: 1 per OP (max 10) + win bonus
+  const xpEarned = Math.min(objectivePoints, 10) + (result === "win" ? 1 : 0);
 
   const { error } = await supabase.from("game_results").insert({
     chapter_id: chapterId,
@@ -380,7 +377,6 @@ export async function submitGameResult(formData: FormData) {
     opponent_player_id: opponentPlayerId || null,
     objective_points: objectivePoints,
     result,
-    tournament_points: tp,
     xp_earned: xpEarned,
     army_percentage_survived: isNaN(armySurvived) ? null : armySurvived,
     enemy_percentage_survived: isNaN(enemySurvived) ? null : enemySurvived,
@@ -519,6 +515,39 @@ export async function resetEntireChapter(formData: FormData): Promise<{ success?
 
   revalidatePath(`/dashboard/admin/campaigns/${campaignId}/chapters`);
   revalidatePath(`/dashboard/admin/matchmaking`);
+  revalidatePath(`/dashboard/campaigns/${campaignId}`);
+  revalidatePath("/dashboard");
+  return { success: true };
+}
+
+// ─── CEB Reset (Admin) ─────────────────────────────────────
+
+export async function resetPlayerCebSkills(formData: FormData): Promise<{ success?: boolean; error?: string }> {
+  const supabase = await createClient();
+
+  const playerId = formData.get("playerId") as string;
+  const campaignId = formData.get("campaignId") as string;
+
+  if (!playerId || !campaignId) return { error: "Missing player or campaign ID" };
+
+  // Delete all CEB entries for this player in this campaign
+  const { error: cebError } = await supabase
+    .from("command_experience")
+    .delete()
+    .eq("player_id", playerId)
+    .eq("campaign_id", campaignId);
+
+  if (cebError) return { error: cebError.message };
+
+  // Remove all CEB-related XP ledger entries (refund the XP)
+  await supabase
+    .from("xp_ledger")
+    .delete()
+    .eq("player_id", playerId)
+    .eq("campaign_id", campaignId)
+    .eq("source", "ceb_purchase");
+
+  revalidatePath("/dashboard/admin/players");
   revalidatePath(`/dashboard/campaigns/${campaignId}`);
   revalidatePath("/dashboard");
   return { success: true };

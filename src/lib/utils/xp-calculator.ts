@@ -27,30 +27,16 @@ export const CONSUMABLE_COSTS: Record<string, number> = {
 /**
  * Calculate XP earned from a game result.
  * Base: 1 OP = 1 XP (max 10 per chapter)
- * Bonus: +1 for winning
+ * Win bonus: +1 for solo win, +3 for strike team win (both players won)
  */
 export function calculateGameXP(
   objectivePoints: number,
-  result: GameResultType
+  result: GameResultType,
+  strikeTeamWin: boolean = false
 ): number {
   const baseXP = Math.min(objectivePoints, 10);
-  const winBonus = result === "win" ? 1 : 0;
+  const winBonus = result === "win" ? (strikeTeamWin ? 3 : 1) : 0;
   return baseXP + winBonus;
-}
-
-/**
- * Calculate strike team bonus XP.
- * If BOTH players in a strike team won their games: +3 XP each (replaces the +1 win bonus).
- * So the net extra is +2 on top of the individual win bonus.
- */
-export function calculateTeamBonusXP(
-  playerResult: GameResultType,
-  teammateResult: GameResultType
-): number {
-  if (playerResult === "win" && teammateResult === "win") {
-    return 2; // +2 extra on top of the +1 win bonus already counted
-  }
-  return 0;
 }
 
 /**
@@ -64,14 +50,19 @@ export function calculateTeamBonusXP(
  *   +1 if 25%+ of enemy army survived
  *   -1 if <25% of own army survived
  *   -level_modifier (0/3/6/9/12 for levels 0-4)
+ *
+ * Army survived is in points (0-300), converted to percentage for thresholds.
  */
 export function calculatePromotionTN(params: {
   result: GameResultType;
   objectivePoints: number;
-  armyPercentageSurvived: number;
-  enemyPercentageSurvived: number;
+  armyPointsSurvived: number;
+  enemyPointsSurvived: number;
   currentLevel: number;
 }): { targetNumber: number; modifiers: Record<string, number> } {
+  const armyPct = (params.armyPointsSurvived / 300) * 100;
+  const enemyPct = (params.enemyPointsSurvived / 300) * 100;
+
   const modifiers: Record<string, number> = {
     base: 2,
   };
@@ -82,13 +73,13 @@ export function calculatePromotionTN(params: {
 
   modifiers.op_bonus = Math.ceil(params.objectivePoints * 0.5);
 
-  if (params.armyPercentageSurvived >= 75) {
+  if (armyPct >= 75) {
     modifiers.army_survived = 1;
-  } else if (params.armyPercentageSurvived < 25) {
+  } else if (armyPct < 25) {
     modifiers.army_low = -1;
   }
 
-  if (params.enemyPercentageSurvived <= 25) {
+  if (enemyPct <= 25) {
     modifiers.enemy_destroyed = 1;
   }
 
@@ -145,6 +136,19 @@ export const PROMOTION_BENEFITS: Record<number, string[]> = {
     "Army Immune to Loss of Lieutenant/Retreat",
   ],
 };
+
+/**
+ * Get the number of free CEB skills granted per commander level.
+ * Each level grants 2 free picks from that CEB tier.
+ * E.g. Commander Level 1 → 2 free L1 picks, Level 2 → 2 free L2 picks, etc.
+ */
+export function getFreeCebSkillsPerLevel(commanderLevel: number): { level: number; count: number }[] {
+  const result: { level: number; count: number }[] = [];
+  for (let l = 1; l <= commanderLevel; l++) {
+    result.push({ level: l, count: 2 });
+  }
+  return result;
+}
 
 /**
  * Get CEB activation limits based on commander level.

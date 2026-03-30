@@ -18,6 +18,7 @@ export async function submitAfterActionReport(formData: FormData): Promise<{ suc
   const result = formData.get("result") as string;
   const armySurvived = parseFloat(formData.get("armySurvived") as string);
   const enemySurvived = parseFloat(formData.get("enemySurvived") as string);
+  const strikeTeamWin = formData.get("strikeTeamWin") === "true";
 
   if (!chapterId || !result) return { error: "Missing required fields" };
 
@@ -33,8 +34,9 @@ export async function submitAfterActionReport(formData: FormData): Promise<{ suc
     return { error: "You already submitted a result for this chapter" };
   }
 
-  // Calculate XP (TP is computed by the DB)
-  const xpEarned = Math.min(objectivePoints, 10) + (result === "win" ? 1 : 0);
+  // Calculate XP: OP + win bonus (+1 solo win, +3 strike team win)
+  const winBonus = result === "win" ? (strikeTeamWin ? 3 : 1) : 0;
+  const xpEarned = Math.min(objectivePoints, 10) + winBonus;
 
   const { error } = await supabase.from("game_results").insert({
     chapter_id: chapterId,
@@ -50,13 +52,16 @@ export async function submitAfterActionReport(formData: FormData): Promise<{ suc
   if (error) return { error: error.message };
 
   // Add XP ledger entry
+  const desc = strikeTeamWin
+    ? `Game result: ${result} (${objectivePoints} OP, Strike Team Win +3)`
+    : `Game result: ${result} (${objectivePoints} OP)`;
   await supabase.from("xp_ledger").insert({
     player_id: user.id,
     campaign_id: campaignId,
     chapter_id: chapterId,
     source: "game",
     amount: xpEarned,
-    description: `Game result: ${result} (${objectivePoints} OP)`,
+    description: desc,
   });
 
   revalidatePath(`/dashboard/campaigns/${campaignId}`);
@@ -172,6 +177,150 @@ export async function purchaseCebLevel(formData: FormData): Promise<{ success?: 
     amount: -xpCost,
     description: `CEB: ${columnType} L${level}`,
   });
+
+  revalidatePath(`/dashboard/campaigns/${campaignId}`);
+  return { success: true };
+}
+
+// ─── CEB Remove (deselect) ────────────────────────────────
+
+export async function removeCebLevel(formData: FormData): Promise<{ success?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const campaignId = formData.get("campaignId") as string;
+  const columnType = formData.get("columnType") as string;
+  const level = parseInt(formData.get("level") as string);
+  const chapterId = formData.get("chapterId") as string;
+
+  if (!columnType || isNaN(level)) return { error: "Invalid parameters" };
+
+  // Find the CEB entry
+  const { data: entry } = await supabase
+    .from("command_experience")
+    .select("id, xp_cost")
+    .eq("player_id", user.id)
+    .eq("campaign_id", campaignId)
+    .eq("column_type", columnType)
+    .eq("level", level)
+    .single();
+
+  if (!entry) return { error: "Skill not found" };
+
+  // Also check no higher levels depend on this one
+  const { data: higherLevels } = await supabase
+    .from("command_experience")
+    .select("id")
+    .eq("player_id", user.id)
+    .eq("campaign_id", campaignId)
+    .eq("column_type", columnType)
+    .gt("level", level)
+    .limit(1);
+
+  if (higherLevels && higherLevels.length > 0) {
+    return { error: "Remove higher levels first" };
+  }
+
+  // Delete the CEB entry
+  const { error } = await supabase
+    .from("command_experience")
+    .delete()
+    .eq("id", entry.id);
+
+  if (error) return { error: error.message };
+
+  // Refund XP if it was a paid skill (xp_cost > 0)
+  if (entry.xp_cost > 0) {
+    // Remove the matching deduction from ledger
+    const { data: ledgerEntry } = await supabase
+      .from("xp_ledger")
+      .select("id")
+      .eq("player_id", user.id)
+      .eq("campaign_id", campaignId)
+      .eq("source", "ceb_purchase")
+      .eq("amount", -entry.xp_cost)
+      .limit(1)
+      .single();
+
+    if (ledgerEntry) {
+      await supabase.from("xp_ledger").delete().eq("id", ledgerEntry.id);
+    }
+  }
+
+  revalidatePath(`/dashboard/campaigns/${campaignId}`);
+  return { success: true };
+}
+
+// ─── CEB Free Skill (from Commander Promotion) ───────────
+
+export async function selectFreeCebSkill(formData: FormData): Promise<{ success?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const campaignId = formData.get("campaignId") as string;
+  const columnType = formData.get("columnType") as string;
+  const level = parseInt(formData.get("level") as string);
+  const chapterNumber = parseInt(formData.get("chapterNumber") as string);
+
+  if (!columnType || isNaN(level)) return { error: "Invalid parameters" };
+
+  // Check commander level allows this
+  const { data: promo } = await supabase
+    .from("commander_promotions")
+    .select("current_level")
+    .eq("player_id", user.id)
+    .eq("campaign_id", campaignId)
+    .single();
+
+  const commanderLevel = promo?.current_level ?? 0;
+  if (level > commanderLevel) {
+    return { error: "Commander level too low for this free skill" };
+  }
+
+  // Count existing free picks at this CEB level (xp_cost = 0)
+  const { data: freePicks } = await supabase
+    .from("command_experience")
+    .select("id")
+    .eq("player_id", user.id)
+    .eq("campaign_id", campaignId)
+    .eq("level", level)
+    .eq("xp_cost", 0);
+
+  if (freePicks && freePicks.length >= 2) {
+    return { error: "Already selected 2 free skills for this level" };
+  }
+
+  // Check not already purchased
+  const { data: existing } = await supabase
+    .from("command_experience")
+    .select("id")
+    .eq("player_id", user.id)
+    .eq("campaign_id", campaignId)
+    .eq("column_type", columnType)
+    .eq("level", level)
+    .limit(1);
+
+  if (existing && existing.length > 0) {
+    return { error: "Already have this skill" };
+  }
+
+  // Insert as free (xp_cost = 0)
+  const { error } = await supabase.from("command_experience").insert({
+    player_id: user.id,
+    campaign_id: campaignId,
+    column_type: columnType,
+    level,
+    xp_cost: 0,
+    purchased_in_chapter: chapterNumber,
+  });
+
+  if (error) return { error: error.message };
 
   revalidatePath(`/dashboard/campaigns/${campaignId}`);
   return { success: true };

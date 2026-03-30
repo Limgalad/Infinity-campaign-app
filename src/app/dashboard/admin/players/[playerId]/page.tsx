@@ -7,6 +7,7 @@ import {
   adjustPlayerXp,
   resetPlayerChapter,
   overrideCommanderLevel,
+  resetPlayerCebSkills,
 } from "../../actions";
 import { useToast } from "@/components/toast";
 import type {
@@ -41,6 +42,7 @@ export default function PlayerProgressionPage({
   const [showXpAdjust, setShowXpAdjust] = useState(false);
   const [showCommanderOverride, setShowCommanderOverride] = useState(false);
   const [resetConfirm, setResetConfirm] = useState<string | null>(null);
+  const [cebResetConfirm, setCebResetConfirm] = useState(false);
 
   async function loadPlayer() {
     const supabase = createClient();
@@ -198,6 +200,20 @@ export default function PlayerProgressionPage({
     } else {
       toast("Commander level updated");
       setShowCommanderOverride(false);
+      loadCampaignData(selectedCampaignId);
+    }
+  }
+
+  async function handleCebReset() {
+    const formData = new FormData();
+    formData.set("playerId", playerId);
+    formData.set("campaignId", selectedCampaignId);
+    const result = await resetPlayerCebSkills(formData);
+    if (result.error) {
+      toast(result.error, "error");
+    } else {
+      toast("CEB skills reset and XP refunded");
+      setCebResetConfirm(false);
       loadCampaignData(selectedCampaignId);
     }
   }
@@ -366,6 +382,34 @@ export default function PlayerProgressionPage({
         >
           {showCommanderOverride ? "Cancel" : "Override Commander Level"}
         </button>
+        {cebResetConfirm ? (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCebReset}
+              className="px-4 py-2 bg-red/15 border-2 border-red-dim text-red hover:bg-red/25 hover:border-red font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+            >
+              Confirm Reset CEB
+            </button>
+            <button
+              onClick={() => setCebResetConfirm(false)}
+              className="px-4 py-2 border border-border text-text-secondary font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setCebResetConfirm(true)}
+            disabled={cebEntries.length === 0}
+            className={`px-4 py-2 border font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer ${
+              cebEntries.length > 0
+                ? "border-red-dim/40 text-red hover:bg-red/10 hover:border-red-dim"
+                : "border-border/30 text-text-muted/30 cursor-not-allowed"
+            }`}
+          >
+            Reset CEB Skills
+          </button>
+        )}
       </div>
 
       {/* XP Adjust Form */}
