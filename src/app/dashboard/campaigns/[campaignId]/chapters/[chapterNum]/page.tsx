@@ -287,8 +287,8 @@ export default function ChapterPage({
     formData.set("campaignId", campaignId);
     formData.set("objectivePoints", objectivePoints.toString());
     formData.set("result", result);
-    formData.set("armySurvived", ((armySurvived / 300) * 100).toFixed(1));
-    formData.set("enemySurvived", ((enemySurvived / 300) * 100).toFixed(1));
+    formData.set("armySurvived", Math.round((armySurvived / 300) * 100).toString());
+    formData.set("enemySurvived", Math.round((enemySurvived / 300) * 100).toString());
     formData.set("strikeTeamWin", strikeTeamWin.toString());
 
     const res = await submitAfterActionReport(formData);
@@ -578,10 +578,7 @@ export default function ChapterPage({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
             <label className="data-label font-[family-name:var(--font-mono)] block mb-2">YOUR ARMY REMAINING (0-300 pts)</label>
-            <div className="flex items-center gap-3">
-              <input type="range" min="0" max="300" step="5" value={armySurvived} onChange={(e) => setArmySurvived(Number(e.target.value))} className="flex-1 accent-cyan" />
-              <span className="font-[family-name:var(--font-mono)] text-sm text-text-primary w-16 text-right">{armySurvived} pts</span>
-            </div>
+            <input type="number" min="0" max="300" step="1" value={armySurvived} onChange={(e) => setArmySurvived(Math.max(0, Math.min(300, Math.floor(Number(e.target.value) || 0))))} placeholder="0-300" className="w-full px-3 py-2 bg-surface border border-border text-text-primary font-[family-name:var(--font-mono)] text-sm focus:border-cyan-dim focus:outline-none transition-colors" />
             <div className="flex justify-between mt-1">
               <span className="font-[family-name:var(--font-mono)] text-xs text-red">&lt;75 pts penalty</span>
               <span className="font-[family-name:var(--font-mono)] text-xs text-green">&gt;225 pts bonus</span>
@@ -589,10 +586,7 @@ export default function ChapterPage({
           </div>
           <div>
             <label className="data-label font-[family-name:var(--font-mono)] block mb-2">ENEMY REMAINING (0-300 pts)</label>
-            <div className="flex items-center gap-3">
-              <input type="range" min="0" max="300" step="5" value={enemySurvived} onChange={(e) => setEnemySurvived(Number(e.target.value))} className="flex-1 accent-amber" />
-              <span className="font-[family-name:var(--font-mono)] text-sm text-text-primary w-16 text-right">{enemySurvived} pts</span>
-            </div>
+            <input type="number" min="0" max="300" step="1" value={enemySurvived} onChange={(e) => setEnemySurvived(Math.max(0, Math.min(300, Math.floor(Number(e.target.value) || 0))))} placeholder="0-300" className="w-full px-3 py-2 bg-surface border border-border text-text-primary font-[family-name:var(--font-mono)] text-sm focus:border-cyan-dim focus:outline-none transition-colors" />
             <div className="flex justify-between mt-1">
               <span className="font-[family-name:var(--font-mono)] text-xs text-green">&le;75 pts bonus</span>
               <span className="font-[family-name:var(--font-mono)] text-xs text-text-muted">&nbsp;</span>
