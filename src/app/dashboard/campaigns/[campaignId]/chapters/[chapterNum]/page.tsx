@@ -218,8 +218,8 @@ export default function ChapterPage({
         const gr = gameResult as GameResult;
         setObjectivePoints(gr.objective_points);
         setResult(gr.result);
-        setArmySurvived(gr.army_percentage_survived ?? 150);
-        setEnemySurvived(gr.enemy_percentage_survived ?? 150);
+        setArmySurvived(gr.army_percentage_survived != null ? Math.round((gr.army_percentage_survived / 100) * 300) : 150);
+        setEnemySurvived(gr.enemy_percentage_survived != null ? Math.round((gr.enemy_percentage_survived / 100) * 300) : 150);
       }
     }
 
@@ -287,8 +287,8 @@ export default function ChapterPage({
     formData.set("campaignId", campaignId);
     formData.set("objectivePoints", objectivePoints.toString());
     formData.set("result", result);
-    formData.set("armySurvived", armySurvived.toString());
-    formData.set("enemySurvived", enemySurvived.toString());
+    formData.set("armySurvived", ((armySurvived / 300) * 100).toFixed(1));
+    formData.set("enemySurvived", ((enemySurvived / 300) * 100).toFixed(1));
     formData.set("strikeTeamWin", strikeTeamWin.toString());
 
     const res = await submitAfterActionReport(formData);
@@ -488,8 +488,242 @@ export default function ChapterPage({
       )}
 
       {/* ═══════════════════════════════════════════════════════ */}
-      {/* XP OVERVIEW — always visible                            */}
+      {/* GAME OUTCOME — AFTER-ACTION REPORT                     */}
       {/* ═══════════════════════════════════════════════════════ */}
+
+      <div className="flex items-center gap-4 mb-8">
+        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-cyan-dim/40 to-transparent" />
+        <span className="font-[family-name:var(--font-orbitron)] text-xs tracking-[0.2em] text-cyan">AFTER-ACTION REPORT</span>
+        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-cyan-dim/40 to-transparent" />
+      </div>
+
+      {/* Submitted banner */}
+      {hasSubmitted && (
+        <div className="mb-6 px-4 py-3 bg-cyan/10 border border-cyan-dim/30 font-[family-name:var(--font-mono)] text-sm text-cyan">
+          After-action report submitted and locked. Result:{" "}
+          <span className="uppercase font-bold">{existingResult.result}</span> — {existingResult.objective_points} OP, {existingResult.tournament_points} TP, {existingResult.xp_earned} XP
+        </div>
+      )}
+
+      {/* Progress indicator */}
+      {!hasSubmitted && (
+        <div className="flex items-center gap-2 mb-6">
+          {[
+            { num: 1, label: "GAME OUTCOME", done: step1Complete, active: true },
+            { num: 2, label: "PROMOTION ROLL", done: step2Complete, active: step1Complete },
+            { num: 3, label: "SUBMIT REPORT", done: false, active: step2Complete },
+          ].map((step, i) => (
+            <div key={step.num} className="flex items-center gap-2 flex-1">
+              <div className={`flex items-center gap-2 px-3 py-2 border transition-all flex-1 ${
+                step.done ? "border-cyan-dim/40 bg-cyan/10" : step.active ? "border-amber-dim/40 bg-amber/5" : "border-border/30 opacity-40"
+              }`}>
+                <span className={`font-[family-name:var(--font-orbitron)] text-xs ${step.done ? "text-cyan" : step.active ? "text-amber" : "text-text-muted"}`}>{step.num}</span>
+                <span className={`font-[family-name:var(--font-mono)] text-[10px] tracking-wider ${step.done ? "text-cyan" : step.active ? "text-text-primary" : "text-text-muted"}`}>{step.label}</span>
+                {step.done && <svg className="w-3 h-3 text-cyan ml-auto shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="square" d="M5 13l4 4L19 7" /></svg>}
+              </div>
+              {i < 2 && <div className={`w-4 h-px shrink-0 ${step.done ? "bg-cyan-dim" : "bg-border/30"}`} />}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* STEP 1: GAME OUTCOME */}
+      <div className={`panel panel-glow p-4 sm:p-5 mb-6 border-cyan-dim/40 ${hasSubmitted ? "opacity-60 pointer-events-none" : ""}`}>
+        <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
+          <div className="w-1 h-5 bg-cyan" />
+          <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">Game Outcome</h2>
+          <span className="ml-auto font-[family-name:var(--font-mono)] text-xs text-cyan tracking-wider">STEP 1</span>
+        </div>
+
+        {/* Result buttons including Strike Team Win */}
+        <div className="grid grid-cols-4 gap-2 sm:gap-3 mb-6">
+          {resultOptions.map((opt) => (
+            <button key={opt.value} onClick={() => { setResult(opt.value); if (opt.value !== "win") setStrikeTeamWin(false); }}
+              className={`py-2.5 sm:py-3 border font-[family-name:var(--font-orbitron)] text-xs sm:text-sm tracking-wider transition-all cursor-pointer ${
+                result === opt.value && !strikeTeamWin ? opt.color : "border-border text-text-muted hover:border-border-bright hover:text-text-secondary"
+              }`}>
+              {opt.label}
+            </button>
+          ))}
+          <button
+            onClick={() => { setResult("win"); setStrikeTeamWin(!strikeTeamWin); }}
+            className={`py-2.5 sm:py-3 border font-[family-name:var(--font-orbitron)] text-xs sm:text-sm tracking-wider transition-all cursor-pointer ${
+              strikeTeamWin ? "text-green border-green-dim bg-green/15" : "border-border text-text-muted hover:border-border-bright hover:text-text-secondary"
+            }`}
+          >
+            TEAM WIN
+          </button>
+        </div>
+
+        {strikeTeamWin && (
+          <div className="mb-4 px-3 py-2 bg-green/5 border border-green-dim/30">
+            <p className="font-[family-name:var(--font-mono)] text-xs text-green">Strike Team Win: Both players won — +3 XP bonus instead of +1</p>
+          </div>
+        )}
+
+        {/* Objective Points */}
+        <div className="mb-6">
+          <label className="data-label font-[family-name:var(--font-mono)] block mb-3">OBJECTIVE POINTS (0-10)</label>
+          <div className="flex flex-wrap items-center gap-1">
+            {Array.from({ length: 11 }).map((_, i) => (
+              <button key={i} onClick={() => setObjectivePoints(i)}
+                className={`w-8 h-8 sm:w-10 sm:h-10 border font-[family-name:var(--font-mono)] text-xs sm:text-sm transition-all cursor-pointer ${
+                  i <= objectivePoints ? "bg-cyan/15 border-cyan-dim/40 text-cyan" : "border-border text-text-muted hover:border-border-bright hover:text-text-secondary"
+                }`}>{i}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Army Survived — 0-300 army points */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div>
+            <label className="data-label font-[family-name:var(--font-mono)] block mb-2">YOUR ARMY REMAINING (0-300 pts)</label>
+            <div className="flex items-center gap-3">
+              <input type="range" min="0" max="300" step="5" value={armySurvived} onChange={(e) => setArmySurvived(Number(e.target.value))} className="flex-1 accent-cyan" />
+              <span className="font-[family-name:var(--font-mono)] text-sm text-text-primary w-16 text-right">{armySurvived} pts</span>
+            </div>
+            <div className="flex justify-between mt-1">
+              <span className="font-[family-name:var(--font-mono)] text-xs text-red">&lt;75 pts penalty</span>
+              <span className="font-[family-name:var(--font-mono)] text-xs text-green">&gt;225 pts bonus</span>
+            </div>
+          </div>
+          <div>
+            <label className="data-label font-[family-name:var(--font-mono)] block mb-2">ENEMY REMAINING (0-300 pts)</label>
+            <div className="flex items-center gap-3">
+              <input type="range" min="0" max="300" step="5" value={enemySurvived} onChange={(e) => setEnemySurvived(Number(e.target.value))} className="flex-1 accent-amber" />
+              <span className="font-[family-name:var(--font-mono)] text-sm text-text-primary w-16 text-right">{enemySurvived} pts</span>
+            </div>
+            <div className="flex justify-between mt-1">
+              <span className="font-[family-name:var(--font-mono)] text-xs text-green">&le;75 pts bonus</span>
+              <span className="font-[family-name:var(--font-mono)] text-xs text-text-muted">&nbsp;</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Live calculations */}
+        <div className="mt-6 pt-4 border-t border-border/50">
+          <div className="grid grid-cols-3 gap-4">
+            <div className="text-center p-3 bg-surface/30 border border-border/20">
+              <div className="data-label font-[family-name:var(--font-mono)] mb-1">XP EARNED</div>
+              <div className="font-[family-name:var(--font-mono)] text-2xl font-bold text-cyan">{xpEarned}</div>
+              <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-secondary mt-1">
+                {objectivePoints} OP{result === "win" ? (strikeTeamWin ? " + 3 TEAM" : " + 1 WIN") : ""}
+              </div>
+            </div>
+            <div className="text-center p-3 bg-surface/30 border border-border/20">
+              <div className="data-label font-[family-name:var(--font-mono)] mb-1">TOURNAMENT PTS</div>
+              <div className={`font-[family-name:var(--font-mono)] text-2xl font-bold ${result === "win" ? "text-green" : result === "draw" ? "text-amber" : "text-red"}`}>
+                {result === "win" ? 3 : result === "draw" ? 2 : 1}
+              </div>
+            </div>
+            <div className="text-center p-3 bg-surface/30 border border-border/20">
+              <div className="data-label font-[family-name:var(--font-mono)] mb-1">PROMOTION TN</div>
+              <div className="font-[family-name:var(--font-mono)] text-2xl font-bold text-amber">{promotionCalc.targetNumber}+</div>
+              <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-secondary mt-1">on D20</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* STEP 2: PROMOTION ROLL */}
+      <div className={`panel p-4 sm:p-5 mb-6 transition-all duration-300 ${
+        hasSubmitted ? "opacity-60 pointer-events-none" : !step1Complete ? "opacity-30 pointer-events-none" : ""
+      }`}>
+        <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
+          <div className="w-1 h-5 bg-amber" />
+          <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">Commander Promotion Roll</h2>
+          <span className="ml-auto font-[family-name:var(--font-mono)] text-xs text-amber tracking-wider">STEP 2</span>
+        </div>
+        {!step1Complete && !hasSubmitted && (
+          <div className="text-center py-6"><p className="font-[family-name:var(--font-mono)] text-xs text-text-muted">Complete Step 1 to unlock promotion roll.</p></div>
+        )}
+        {(step1Complete || hasSubmitted) && (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+              <div className="space-y-2">
+                <div className="data-label font-[family-name:var(--font-mono)]">MODIFIERS</div>
+                {Object.entries(promotionCalc.modifiers).map(([key, value]) => (
+                  <div key={key} className="flex items-center justify-between px-3 py-1.5 bg-surface/50 border border-border/30">
+                    <span className="font-[family-name:var(--font-mono)] text-xs text-text-secondary capitalize">{key.replace(/_/g, " ")}</span>
+                    <span className={`font-[family-name:var(--font-mono)] text-xs font-bold ${value >= 0 ? "text-green" : "text-red"}`}>{value >= 0 ? "+" : ""}{value}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-col items-center justify-center p-4 bg-surface/30 border border-amber-dim/30">
+                <div className="data-label font-[family-name:var(--font-mono)] mb-2">TARGET NUMBER</div>
+                <div className="font-[family-name:var(--font-orbitron)] text-4xl sm:text-5xl font-bold text-amber">{promotionCalc.targetNumber}</div>
+                <div className="font-[family-name:var(--font-mono)] text-xs text-text-secondary mt-2">ROLL D20 &le; {promotionCalc.targetNumber}</div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+              <label className="data-label font-[family-name:var(--font-mono)] shrink-0">YOUR ROLL:</label>
+              <input type="number" min="1" max="20" value={promotionRoll ?? ""} onChange={(e) => setPromotionRoll(e.target.value ? Number(e.target.value) : null)} placeholder="1-20" className="w-24 font-[family-name:var(--font-mono)] text-center text-lg" />
+              {promotionSuccess !== null && (
+                <div className={`flex-1 px-4 py-2 border font-[family-name:var(--font-orbitron)] text-sm tracking-wider text-center ${
+                  promotionSuccess ? "bg-green/10 border-green-dim text-green" : "bg-red/10 border-red-dim text-red"
+                }`}>{promotionSuccess ? "PROMOTED!" : "FAILED"}</div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* STEP 3: SUBMIT */}
+      {!hasSubmitted && (
+        <div className={`panel panel-glow p-4 sm:p-5 mb-8 transition-all duration-300 ${!step2Complete ? "opacity-30 pointer-events-none border-border/30" : "border-cyan-dim/40"}`}>
+          <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
+            <div className="w-1 h-5 bg-green" />
+            <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">Review & Submit</h2>
+            <span className="ml-auto font-[family-name:var(--font-mono)] text-xs text-green tracking-wider">STEP 3</span>
+          </div>
+          {!step2Complete && (
+            <div className="text-center py-6"><p className="font-[family-name:var(--font-mono)] text-xs text-text-muted">Complete Steps 1 & 2 to submit your report.</p></div>
+          )}
+          {step2Complete && (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                <div className="px-3 py-2 bg-surface/30 border border-border/20">
+                  <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted mb-1">RESULT</div>
+                  <div className={`font-[family-name:var(--font-orbitron)] text-sm uppercase ${result === "win" ? "text-green" : result === "draw" ? "text-amber" : "text-red"}`}>
+                    {strikeTeamWin ? "TEAM WIN" : result}
+                  </div>
+                </div>
+                <div className="px-3 py-2 bg-surface/30 border border-border/20">
+                  <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted mb-1">OBJ. POINTS</div>
+                  <div className="font-[family-name:var(--font-mono)] text-sm text-cyan">{objectivePoints}</div>
+                </div>
+                <div className="px-3 py-2 bg-surface/30 border border-border/20">
+                  <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted mb-1">XP EARNED</div>
+                  <div className="font-[family-name:var(--font-mono)] text-sm text-cyan">{xpEarned}</div>
+                </div>
+                <div className="px-3 py-2 bg-surface/30 border border-border/20">
+                  <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted mb-1">PROMOTION</div>
+                  <div className={`font-[family-name:var(--font-orbitron)] text-sm ${promotionSuccess ? "text-green" : "text-red"}`}>{promotionSuccess ? "PROMOTED" : "FAILED"}</div>
+                </div>
+              </div>
+              <div className="p-3 bg-amber/5 border border-amber-dim/30 mb-5">
+                <p className="font-[family-name:var(--font-mono)] text-xs text-amber">Once submitted, your game result will be locked and cannot be edited.</p>
+              </div>
+              <button onClick={handleSubmitReport} disabled={submitting}
+                className="w-full px-8 py-4 bg-cyan/20 border-2 border-cyan text-cyan font-[family-name:var(--font-orbitron)] text-sm sm:text-base tracking-[0.2em] uppercase hover:bg-cyan/30 hover:shadow-[0_0_24px_rgba(0,229,255,0.25)] transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50">
+                {submitting ? "SUBMITTING..." : "SUBMIT AFTER-ACTION REPORT"}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════ */}
+      {/* CAMPAIGN SHEET — XP, CEB, SPEC-OPS, CONSUMABLES        */}
+      {/* ═══════════════════════════════════════════════════════ */}
+
+      <div className="flex items-center gap-4 my-8">
+        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-amber-dim/40 to-transparent" />
+        <span className="font-[family-name:var(--font-orbitron)] text-xs tracking-[0.2em] text-amber">CAMPAIGN SHEET</span>
+        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-amber-dim/40 to-transparent" />
+      </div>
+
+      {/* XP OVERVIEW */}
       <div className="panel panel-glow p-4 sm:p-5 mb-8">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-1 h-5 bg-cyan" />
@@ -761,231 +995,6 @@ export default function ChapterPage({
         </div>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════ */}
-      {/* GAME OUTCOME — AFTER-ACTION REPORT                     */}
-      {/* ═══════════════════════════════════════════════════════ */}
-
-      <div className="flex items-center gap-4 my-8">
-        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-cyan-dim/40 to-transparent" />
-        <span className="font-[family-name:var(--font-orbitron)] text-xs tracking-[0.2em] text-cyan">AFTER-ACTION REPORT</span>
-        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-cyan-dim/40 to-transparent" />
-      </div>
-
-      {/* Submitted banner */}
-      {hasSubmitted && (
-        <div className="mb-6 px-4 py-3 bg-cyan/10 border border-cyan-dim/30 font-[family-name:var(--font-mono)] text-sm text-cyan">
-          After-action report submitted and locked. Result:{" "}
-          <span className="uppercase font-bold">{existingResult.result}</span> — {existingResult.objective_points} OP, {existingResult.tournament_points} TP, {existingResult.xp_earned} XP
-        </div>
-      )}
-
-      {/* Progress indicator */}
-      {!hasSubmitted && (
-        <div className="flex items-center gap-2 mb-6">
-          {[
-            { num: 1, label: "GAME OUTCOME", done: step1Complete, active: true },
-            { num: 2, label: "PROMOTION ROLL", done: step2Complete, active: step1Complete },
-            { num: 3, label: "SUBMIT REPORT", done: false, active: step2Complete },
-          ].map((step, i) => (
-            <div key={step.num} className="flex items-center gap-2 flex-1">
-              <div className={`flex items-center gap-2 px-3 py-2 border transition-all flex-1 ${
-                step.done ? "border-cyan-dim/40 bg-cyan/10" : step.active ? "border-amber-dim/40 bg-amber/5" : "border-border/30 opacity-40"
-              }`}>
-                <span className={`font-[family-name:var(--font-orbitron)] text-xs ${step.done ? "text-cyan" : step.active ? "text-amber" : "text-text-muted"}`}>{step.num}</span>
-                <span className={`font-[family-name:var(--font-mono)] text-[10px] tracking-wider ${step.done ? "text-cyan" : step.active ? "text-text-primary" : "text-text-muted"}`}>{step.label}</span>
-                {step.done && <svg className="w-3 h-3 text-cyan ml-auto shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="square" d="M5 13l4 4L19 7" /></svg>}
-              </div>
-              {i < 2 && <div className={`w-4 h-px shrink-0 ${step.done ? "bg-cyan-dim" : "bg-border/30"}`} />}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* STEP 1: GAME OUTCOME */}
-      <div className={`panel panel-glow p-4 sm:p-5 mb-6 border-cyan-dim/40 ${hasSubmitted ? "opacity-60 pointer-events-none" : ""}`}>
-        <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
-          <div className="w-1 h-5 bg-cyan" />
-          <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">Game Outcome</h2>
-          <span className="ml-auto font-[family-name:var(--font-mono)] text-xs text-cyan tracking-wider">STEP 1</span>
-        </div>
-
-        {/* Result buttons including Strike Team Win */}
-        <div className="grid grid-cols-4 gap-2 sm:gap-3 mb-6">
-          {resultOptions.map((opt) => (
-            <button key={opt.value} onClick={() => { setResult(opt.value); if (opt.value !== "win") setStrikeTeamWin(false); }}
-              className={`py-2.5 sm:py-3 border font-[family-name:var(--font-orbitron)] text-xs sm:text-sm tracking-wider transition-all cursor-pointer ${
-                result === opt.value && !strikeTeamWin ? opt.color : "border-border text-text-muted hover:border-border-bright hover:text-text-secondary"
-              }`}>
-              {opt.label}
-            </button>
-          ))}
-          <button
-            onClick={() => { setResult("win"); setStrikeTeamWin(!strikeTeamWin); }}
-            className={`py-2.5 sm:py-3 border font-[family-name:var(--font-orbitron)] text-xs sm:text-sm tracking-wider transition-all cursor-pointer ${
-              strikeTeamWin ? "text-green border-green-dim bg-green/15" : "border-border text-text-muted hover:border-border-bright hover:text-text-secondary"
-            }`}
-          >
-            TEAM WIN
-          </button>
-        </div>
-
-        {strikeTeamWin && (
-          <div className="mb-4 px-3 py-2 bg-green/5 border border-green-dim/30">
-            <p className="font-[family-name:var(--font-mono)] text-xs text-green">Strike Team Win: Both players won — +3 XP bonus instead of +1</p>
-          </div>
-        )}
-
-        {/* Objective Points */}
-        <div className="mb-6">
-          <label className="data-label font-[family-name:var(--font-mono)] block mb-3">OBJECTIVE POINTS (0-10)</label>
-          <div className="flex flex-wrap items-center gap-1">
-            {Array.from({ length: 11 }).map((_, i) => (
-              <button key={i} onClick={() => setObjectivePoints(i)}
-                className={`w-8 h-8 sm:w-10 sm:h-10 border font-[family-name:var(--font-mono)] text-xs sm:text-sm transition-all cursor-pointer ${
-                  i <= objectivePoints ? "bg-cyan/15 border-cyan-dim/40 text-cyan" : "border-border text-text-muted hover:border-border-bright hover:text-text-secondary"
-                }`}>{i}</button>
-            ))}
-          </div>
-        </div>
-
-        {/* Army Survived — 0-300 army points */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <div>
-            <label className="data-label font-[family-name:var(--font-mono)] block mb-2">YOUR ARMY REMAINING (0-300 pts)</label>
-            <div className="flex items-center gap-3">
-              <input type="range" min="0" max="300" step="5" value={armySurvived} onChange={(e) => setArmySurvived(Number(e.target.value))} className="flex-1 accent-cyan" />
-              <span className="font-[family-name:var(--font-mono)] text-sm text-text-primary w-16 text-right">{armySurvived} pts</span>
-            </div>
-            <div className="flex justify-between mt-1">
-              <span className="font-[family-name:var(--font-mono)] text-xs text-red">&lt;75 pts penalty</span>
-              <span className="font-[family-name:var(--font-mono)] text-xs text-green">&gt;225 pts bonus</span>
-            </div>
-          </div>
-          <div>
-            <label className="data-label font-[family-name:var(--font-mono)] block mb-2">ENEMY REMAINING (0-300 pts)</label>
-            <div className="flex items-center gap-3">
-              <input type="range" min="0" max="300" step="5" value={enemySurvived} onChange={(e) => setEnemySurvived(Number(e.target.value))} className="flex-1 accent-amber" />
-              <span className="font-[family-name:var(--font-mono)] text-sm text-text-primary w-16 text-right">{enemySurvived} pts</span>
-            </div>
-            <div className="flex justify-between mt-1">
-              <span className="font-[family-name:var(--font-mono)] text-xs text-green">&le;75 pts bonus</span>
-              <span className="font-[family-name:var(--font-mono)] text-xs text-text-muted">&nbsp;</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Live calculations */}
-        <div className="mt-6 pt-4 border-t border-border/50">
-          <div className="grid grid-cols-3 gap-4">
-            <div className="text-center p-3 bg-surface/30 border border-border/20">
-              <div className="data-label font-[family-name:var(--font-mono)] mb-1">XP EARNED</div>
-              <div className="font-[family-name:var(--font-mono)] text-2xl font-bold text-cyan">{xpEarned}</div>
-              <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-secondary mt-1">
-                {objectivePoints} OP{result === "win" ? (strikeTeamWin ? " + 3 TEAM" : " + 1 WIN") : ""}
-              </div>
-            </div>
-            <div className="text-center p-3 bg-surface/30 border border-border/20">
-              <div className="data-label font-[family-name:var(--font-mono)] mb-1">TOURNAMENT PTS</div>
-              <div className={`font-[family-name:var(--font-mono)] text-2xl font-bold ${result === "win" ? "text-green" : result === "draw" ? "text-amber" : "text-red"}`}>
-                {result === "win" ? 3 : result === "draw" ? 2 : 1}
-              </div>
-            </div>
-            <div className="text-center p-3 bg-surface/30 border border-border/20">
-              <div className="data-label font-[family-name:var(--font-mono)] mb-1">PROMOTION TN</div>
-              <div className="font-[family-name:var(--font-mono)] text-2xl font-bold text-amber">{promotionCalc.targetNumber}+</div>
-              <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-secondary mt-1">on D20</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* STEP 2: PROMOTION ROLL */}
-      <div className={`panel p-4 sm:p-5 mb-6 transition-all duration-300 ${
-        hasSubmitted ? "opacity-60 pointer-events-none" : !step1Complete ? "opacity-30 pointer-events-none" : ""
-      }`}>
-        <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
-          <div className="w-1 h-5 bg-amber" />
-          <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">Commander Promotion Roll</h2>
-          <span className="ml-auto font-[family-name:var(--font-mono)] text-xs text-amber tracking-wider">STEP 2</span>
-        </div>
-        {!step1Complete && !hasSubmitted && (
-          <div className="text-center py-6"><p className="font-[family-name:var(--font-mono)] text-xs text-text-muted">Complete Step 1 to unlock promotion roll.</p></div>
-        )}
-        {(step1Complete || hasSubmitted) && (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
-              <div className="space-y-2">
-                <div className="data-label font-[family-name:var(--font-mono)]">MODIFIERS</div>
-                {Object.entries(promotionCalc.modifiers).map(([key, value]) => (
-                  <div key={key} className="flex items-center justify-between px-3 py-1.5 bg-surface/50 border border-border/30">
-                    <span className="font-[family-name:var(--font-mono)] text-xs text-text-secondary capitalize">{key.replace(/_/g, " ")}</span>
-                    <span className={`font-[family-name:var(--font-mono)] text-xs font-bold ${value >= 0 ? "text-green" : "text-red"}`}>{value >= 0 ? "+" : ""}{value}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-col items-center justify-center p-4 bg-surface/30 border border-amber-dim/30">
-                <div className="data-label font-[family-name:var(--font-mono)] mb-2">TARGET NUMBER</div>
-                <div className="font-[family-name:var(--font-orbitron)] text-4xl sm:text-5xl font-bold text-amber">{promotionCalc.targetNumber}</div>
-                <div className="font-[family-name:var(--font-mono)] text-xs text-text-secondary mt-2">ROLL D20 &le; {promotionCalc.targetNumber}</div>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-              <label className="data-label font-[family-name:var(--font-mono)] shrink-0">YOUR ROLL:</label>
-              <input type="number" min="1" max="20" value={promotionRoll ?? ""} onChange={(e) => setPromotionRoll(e.target.value ? Number(e.target.value) : null)} placeholder="1-20" className="w-24 font-[family-name:var(--font-mono)] text-center text-lg" />
-              {promotionSuccess !== null && (
-                <div className={`flex-1 px-4 py-2 border font-[family-name:var(--font-orbitron)] text-sm tracking-wider text-center ${
-                  promotionSuccess ? "bg-green/10 border-green-dim text-green" : "bg-red/10 border-red-dim text-red"
-                }`}>{promotionSuccess ? "PROMOTED!" : "FAILED"}</div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* STEP 3: SUBMIT */}
-      {!hasSubmitted && (
-        <div className={`panel panel-glow p-4 sm:p-5 mb-8 transition-all duration-300 ${!step2Complete ? "opacity-30 pointer-events-none border-border/30" : "border-cyan-dim/40"}`}>
-          <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
-            <div className="w-1 h-5 bg-green" />
-            <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">Review & Submit</h2>
-            <span className="ml-auto font-[family-name:var(--font-mono)] text-xs text-green tracking-wider">STEP 3</span>
-          </div>
-          {!step2Complete && (
-            <div className="text-center py-6"><p className="font-[family-name:var(--font-mono)] text-xs text-text-muted">Complete Steps 1 & 2 to submit your report.</p></div>
-          )}
-          {step2Complete && (
-            <>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-                <div className="px-3 py-2 bg-surface/30 border border-border/20">
-                  <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted mb-1">RESULT</div>
-                  <div className={`font-[family-name:var(--font-orbitron)] text-sm uppercase ${result === "win" ? "text-green" : result === "draw" ? "text-amber" : "text-red"}`}>
-                    {strikeTeamWin ? "TEAM WIN" : result}
-                  </div>
-                </div>
-                <div className="px-3 py-2 bg-surface/30 border border-border/20">
-                  <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted mb-1">OBJ. POINTS</div>
-                  <div className="font-[family-name:var(--font-mono)] text-sm text-cyan">{objectivePoints}</div>
-                </div>
-                <div className="px-3 py-2 bg-surface/30 border border-border/20">
-                  <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted mb-1">XP EARNED</div>
-                  <div className="font-[family-name:var(--font-mono)] text-sm text-cyan">{xpEarned}</div>
-                </div>
-                <div className="px-3 py-2 bg-surface/30 border border-border/20">
-                  <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted mb-1">PROMOTION</div>
-                  <div className={`font-[family-name:var(--font-orbitron)] text-sm ${promotionSuccess ? "text-green" : "text-red"}`}>{promotionSuccess ? "PROMOTED" : "FAILED"}</div>
-                </div>
-              </div>
-              <div className="p-3 bg-amber/5 border border-amber-dim/30 mb-5">
-                <p className="font-[family-name:var(--font-mono)] text-xs text-amber">Once submitted, your game result will be locked and cannot be edited.</p>
-              </div>
-              <button onClick={handleSubmitReport} disabled={submitting}
-                className="w-full px-8 py-4 bg-cyan/20 border-2 border-cyan text-cyan font-[family-name:var(--font-orbitron)] text-sm sm:text-base tracking-[0.2em] uppercase hover:bg-cyan/30 hover:shadow-[0_0_24px_rgba(0,229,255,0.25)] transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50">
-                {submitting ? "SUBMITTING..." : "SUBMIT AFTER-ACTION REPORT"}
-              </button>
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }
