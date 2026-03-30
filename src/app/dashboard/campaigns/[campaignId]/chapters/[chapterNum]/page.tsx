@@ -460,7 +460,7 @@ export default function ChapterPage({
           <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
             <div className="w-1 h-5 bg-amber" />
             <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">Your Match</h2>
-            <span className={`ml-auto inline-flex items-center px-2 py-0.5 border font-[family-name:var(--font-mono)] text-[10px] tracking-wider uppercase ${
+            <span className={`ml-auto inline-flex items-center px-2 py-0.5 border font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase ${
               matchInfo.status === "completed" ? "border-cyan-dim/30 text-cyan" : matchInfo.status === "in_progress" ? "border-green-dim/30 text-green" : "border-amber-dim/30 text-amber"
             }`}>{matchInfo.status.replace("_", " ")}</span>
           </div>
@@ -518,7 +518,7 @@ export default function ChapterPage({
                 step.done ? "border-cyan-dim/40 bg-cyan/10" : step.active ? "border-amber-dim/40 bg-amber/5" : "border-border/30 opacity-40"
               }`}>
                 <span className={`font-[family-name:var(--font-orbitron)] text-xs ${step.done ? "text-cyan" : step.active ? "text-amber" : "text-text-muted"}`}>{step.num}</span>
-                <span className={`font-[family-name:var(--font-mono)] text-[10px] tracking-wider ${step.done ? "text-cyan" : step.active ? "text-text-primary" : "text-text-muted"}`}>{step.label}</span>
+                <span className={`font-[family-name:var(--font-mono)] text-xs tracking-wider ${step.done ? "text-cyan" : step.active ? "text-text-primary" : "text-text-muted"}`}>{step.label}</span>
                 {step.done && <svg className="w-3 h-3 text-cyan ml-auto shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="square" d="M5 13l4 4L19 7" /></svg>}
               </div>
               {i < 2 && <div className={`w-4 h-px shrink-0 ${step.done ? "bg-cyan-dim" : "bg-border/30"}`} />}
@@ -536,10 +536,10 @@ export default function ChapterPage({
         </div>
 
         {/* Result buttons including Strike Team Win */}
-        <div className="grid grid-cols-4 gap-2 sm:gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-6">
           {resultOptions.map((opt) => (
             <button key={opt.value} onClick={() => { setResult(opt.value); if (opt.value !== "win") setStrikeTeamWin(false); }}
-              className={`py-2.5 sm:py-3 border font-[family-name:var(--font-orbitron)] text-xs sm:text-sm tracking-wider transition-all cursor-pointer ${
+              className={`py-3 border font-[family-name:var(--font-orbitron)] text-sm tracking-wider transition-all cursor-pointer ${
                 result === opt.value && !strikeTeamWin ? opt.color : "border-border text-text-muted hover:border-border-bright hover:text-text-secondary"
               }`}>
               {opt.label}
@@ -547,7 +547,7 @@ export default function ChapterPage({
           ))}
           <button
             onClick={() => { setResult("win"); setStrikeTeamWin(!strikeTeamWin); }}
-            className={`py-2.5 sm:py-3 border font-[family-name:var(--font-orbitron)] text-xs sm:text-sm tracking-wider transition-all cursor-pointer ${
+            className={`py-3 border font-[family-name:var(--font-orbitron)] text-sm tracking-wider transition-all cursor-pointer ${
               strikeTeamWin ? "text-green border-green-dim bg-green/15" : "border-border text-text-muted hover:border-border-bright hover:text-text-secondary"
             }`}
           >
@@ -567,7 +567,7 @@ export default function ChapterPage({
           <div className="flex flex-wrap items-center gap-1">
             {Array.from({ length: 11 }).map((_, i) => (
               <button key={i} onClick={() => setObjectivePoints(i)}
-                className={`w-8 h-8 sm:w-10 sm:h-10 border font-[family-name:var(--font-mono)] text-xs sm:text-sm transition-all cursor-pointer ${
+                className={`w-10 h-10 border font-[family-name:var(--font-mono)] text-sm transition-all cursor-pointer ${
                   i <= objectivePoints ? "bg-cyan/15 border-cyan-dim/40 text-cyan" : "border-border text-text-muted hover:border-border-bright hover:text-text-secondary"
                 }`}>{i}</button>
             ))}
@@ -596,11 +596,11 @@ export default function ChapterPage({
 
         {/* Live calculations */}
         <div className="mt-6 pt-4 border-t border-border/50">
-          <div className="grid grid-cols-3 gap-4">
-            <div className="text-center p-3 bg-surface/30 border border-border/20">
+          <div className="grid grid-cols-3 gap-3 sm:gap-4">
+            <div className="text-center p-2 sm:p-3 bg-surface/30 border border-border/20">
               <div className="data-label font-[family-name:var(--font-mono)] mb-1">XP EARNED</div>
               <div className="font-[family-name:var(--font-mono)] text-2xl font-bold text-cyan">{xpEarned}</div>
-              <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-secondary mt-1">
+              <div className="font-[family-name:var(--font-mono)] text-xs text-text-secondary mt-1">
                 {objectivePoints} OP{result === "win" ? (strikeTeamWin ? " + 3 TEAM" : " + 1 WIN") : ""}
               </div>
             </div>
@@ -613,7 +613,7 @@ export default function ChapterPage({
             <div className="text-center p-3 bg-surface/30 border border-border/20">
               <div className="data-label font-[family-name:var(--font-mono)] mb-1">PROMOTION TN</div>
               <div className="font-[family-name:var(--font-mono)] text-2xl font-bold text-amber">{promotionCalc.targetNumber}+</div>
-              <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-secondary mt-1">on D20</div>
+              <div className="font-[family-name:var(--font-mono)] text-xs text-text-secondary mt-1">on D20</div>
             </div>
           </div>
         </div>
@@ -651,7 +651,7 @@ export default function ChapterPage({
             </div>
             <div className="flex flex-wrap items-center gap-3 sm:gap-4">
               <label className="data-label font-[family-name:var(--font-mono)] shrink-0">YOUR ROLL:</label>
-              <input type="number" min="1" max="20" value={promotionRoll ?? ""} onChange={(e) => setPromotionRoll(e.target.value ? Number(e.target.value) : null)} placeholder="1-20" className="w-24 font-[family-name:var(--font-mono)] text-center text-lg" />
+              <input type="number" min="1" max="20" value={promotionRoll ?? ""} onChange={(e) => setPromotionRoll(e.target.value ? Number(e.target.value) : null)} placeholder="1-20" className="w-full sm:w-24 px-3 py-2 bg-surface border border-border text-text-primary font-[family-name:var(--font-mono)] text-center text-lg focus:border-cyan-dim focus:outline-none transition-colors" />
               {promotionSuccess !== null && (
                 <div className={`flex-1 px-4 py-2 border font-[family-name:var(--font-orbitron)] text-sm tracking-wider text-center ${
                   promotionSuccess ? "bg-green/10 border-green-dim text-green" : "bg-red/10 border-red-dim text-red"
@@ -675,23 +675,23 @@ export default function ChapterPage({
           )}
           {step2Complete && (
             <>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-5">
                 <div className="px-3 py-2 bg-surface/30 border border-border/20">
-                  <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted mb-1">RESULT</div>
+                  <div className="font-[family-name:var(--font-mono)] text-xs text-text-muted mb-1">RESULT</div>
                   <div className={`font-[family-name:var(--font-orbitron)] text-sm uppercase ${result === "win" ? "text-green" : result === "draw" ? "text-amber" : "text-red"}`}>
                     {strikeTeamWin ? "TEAM WIN" : result}
                   </div>
                 </div>
                 <div className="px-3 py-2 bg-surface/30 border border-border/20">
-                  <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted mb-1">OBJ. POINTS</div>
+                  <div className="font-[family-name:var(--font-mono)] text-xs text-text-muted mb-1">OBJ. POINTS</div>
                   <div className="font-[family-name:var(--font-mono)] text-sm text-cyan">{objectivePoints}</div>
                 </div>
                 <div className="px-3 py-2 bg-surface/30 border border-border/20">
-                  <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted mb-1">XP EARNED</div>
+                  <div className="font-[family-name:var(--font-mono)] text-xs text-text-muted mb-1">XP EARNED</div>
                   <div className="font-[family-name:var(--font-mono)] text-sm text-cyan">{xpEarned}</div>
                 </div>
                 <div className="px-3 py-2 bg-surface/30 border border-border/20">
-                  <div className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted mb-1">PROMOTION</div>
+                  <div className="font-[family-name:var(--font-mono)] text-xs text-text-muted mb-1">PROMOTION</div>
                   <div className={`font-[family-name:var(--font-orbitron)] text-sm ${promotionSuccess ? "text-green" : "text-red"}`}>{promotionSuccess ? "PROMOTED" : "FAILED"}</div>
                 </div>
               </div>
@@ -771,7 +771,7 @@ export default function ChapterPage({
             {CEB_COLUMNS.map((col) => (
               <div key={col.key} className="text-center pb-2 border-b border-border mb-2">
                 <div className="font-[family-name:var(--font-orbitron)] text-xs tracking-wider text-text-primary">{col.shortLabel}</div>
-                <div className="font-[family-name:var(--font-mono)] text-[11px] text-text-secondary mt-0.5">{col.label}</div>
+                <div className="font-[family-name:var(--font-mono)] text-xs text-text-secondary mt-0.5">{col.label}</div>
               </div>
             ))}
 
@@ -812,7 +812,7 @@ export default function ChapterPage({
                         {isFree ? "FREE" : `${CEB_LEVEL_COSTS[level]} XP`}
                       </span>
                     </div>
-                    <div className={`font-[family-name:var(--font-mono)] text-[11px] leading-snug ${isPurchased ? "text-text-primary" : "text-text-secondary"}`}>{levelDesc}</div>
+                    <div className={`font-[family-name:var(--font-mono)] text-xs leading-snug ${isPurchased ? "text-text-primary" : "text-text-secondary"}`}>{levelDesc}</div>
                     {isPurchased && (
                       <div className={`absolute top-1 right-1 w-4 h-4 ${isFree ? "bg-green" : "bg-cyan"} flex items-center justify-center`}>
                         <svg className="w-2.5 h-2.5 text-void" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="square" d="M5 13l4 4L19 7" /></svg>

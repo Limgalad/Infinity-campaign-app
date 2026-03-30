@@ -287,7 +287,7 @@ export default function PlayerProgressionPage({
                     </span>
                   </>
                 )}
-                <span className={`inline-flex items-center px-2 py-0.5 border font-[family-name:var(--font-mono)] text-[10px] tracking-wider uppercase ${
+                <span className={`inline-flex items-center px-2 py-0.5 border font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase ${
                   player.role === "admin"
                     ? "bg-red/10 border-red-dim/30 text-red"
                     : "bg-surface border-border text-text-secondary"
@@ -319,7 +319,7 @@ export default function PlayerProgressionPage({
       </div>
 
       {/* Stats Row */}
-      <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 sm:gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-4 mb-6">
         <div className="panel p-4 text-center">
           <div className="font-[family-name:var(--font-mono)] text-xs text-text-muted uppercase tracking-wider mb-1">
             XP Earned
@@ -363,13 +363,13 @@ export default function PlayerProgressionPage({
       </div>
 
       {/* Admin Actions Row */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-6">
         <button
           onClick={() => {
             setShowXpAdjust(!showXpAdjust);
             setShowCommanderOverride(false);
           }}
-          className="px-4 py-2 bg-cyan/15 border-2 border-cyan-dim text-cyan hover:bg-cyan/25 hover:border-cyan font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+          className="px-4 py-2.5 bg-cyan/15 border-2 border-cyan-dim text-cyan hover:bg-cyan/25 hover:border-cyan font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
         >
           {showXpAdjust ? "Cancel" : "Adjust XP"}
         </button>
@@ -378,21 +378,21 @@ export default function PlayerProgressionPage({
             setShowCommanderOverride(!showCommanderOverride);
             setShowXpAdjust(false);
           }}
-          className="px-4 py-2 border border-amber-dim text-amber hover:bg-amber/10 hover:border-amber font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+          className="px-4 py-2.5 border border-amber-dim text-amber hover:bg-amber/10 hover:border-amber font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
         >
           {showCommanderOverride ? "Cancel" : "Override Commander Level"}
         </button>
         {cebResetConfirm ? (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleCebReset}
-              className="px-4 py-2 bg-red/15 border-2 border-red-dim text-red hover:bg-red/25 hover:border-red font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+              className="px-4 py-2.5 bg-red/15 border-2 border-red-dim text-red hover:bg-red/25 hover:border-red font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
             >
               Confirm Reset CEB
             </button>
             <button
               onClick={() => setCebResetConfirm(false)}
-              className="px-4 py-2 border border-border text-text-secondary font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+              className="px-4 py-2.5 border border-border text-text-secondary font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
             >
               Cancel
             </button>
@@ -401,7 +401,7 @@ export default function PlayerProgressionPage({
           <button
             onClick={() => setCebResetConfirm(true)}
             disabled={cebEntries.length === 0}
-            className={`px-4 py-2 border font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer ${
+            className={`px-4 py-2.5 border font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer ${
               cebEntries.length > 0
                 ? "border-red-dim/40 text-red hover:bg-red/10 hover:border-red-dim"
                 : "border-border/30 text-text-muted/30 cursor-not-allowed"
@@ -433,7 +433,7 @@ export default function PlayerProgressionPage({
                 placeholder="e.g. 5 or -3"
                 className="w-full px-3 py-2 bg-surface border border-border text-text-primary font-[family-name:var(--font-mono)] text-sm focus:border-cyan-dim focus:outline-none transition-colors"
               />
-              <p className="font-[family-name:var(--font-mono)] text-[10px] text-text-muted mt-1">
+              <p className="font-[family-name:var(--font-mono)] text-xs text-text-muted mt-1">
                 Positive to add, negative to deduct
               </p>
             </div>
@@ -451,7 +451,7 @@ export default function PlayerProgressionPage({
           </div>
           <button
             type="submit"
-            className="px-4 py-2 bg-cyan/15 border-2 border-cyan-dim text-cyan hover:bg-cyan/25 hover:border-cyan font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+            className="px-4 py-2.5 bg-cyan/15 border-2 border-cyan-dim text-cyan hover:bg-cyan/25 hover:border-cyan font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
           >
             Apply Adjustment
           </button>
@@ -490,7 +490,7 @@ export default function PlayerProgressionPage({
           </div>
           <button
             type="submit"
-            className="px-4 py-2 bg-amber/15 border-2 border-amber-dim text-amber hover:bg-amber/25 hover:border-amber font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+            className="px-4 py-2.5 bg-amber/15 border-2 border-amber-dim text-amber hover:bg-amber/25 hover:border-amber font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
           >
             Set Commander Level
           </button>
@@ -533,7 +533,7 @@ export default function PlayerProgressionPage({
                       {gr.tournament_points} TP
                     </span>
                     <span
-                      className={`inline-flex px-2 py-0.5 font-[family-name:var(--font-mono)] text-[10px] tracking-wider uppercase border ${
+                      className={`inline-flex px-2 py-0.5 font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase border ${
                         gr.result === "win"
                           ? "bg-green/10 border-green-dim/30 text-green"
                           : gr.result === "draw"
@@ -675,7 +675,7 @@ export default function PlayerProgressionPage({
                     {ch.name}
                   </span>
                   <span
-                    className={`font-[family-name:var(--font-mono)] text-[10px] tracking-wider uppercase ${
+                    className={`font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase ${
                       status === "completed"
                         ? "text-cyan"
                         : status === "active"
@@ -697,13 +697,13 @@ export default function PlayerProgressionPage({
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => handleChapterReset(ch.id)}
-                        className="px-3 py-1.5 bg-red/15 border border-red-dim text-red hover:bg-red/25 font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+                        className="px-3 py-2.5 bg-red/15 border border-red-dim text-red hover:bg-red/25 font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
                       >
                         Confirm Reset
                       </button>
                       <button
                         onClick={() => setResetConfirm(null)}
-                        className="px-3 py-1.5 border border-border text-text-secondary font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+                        className="px-3 py-2.5 border border-border text-text-secondary font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
                       >
                         Cancel
                       </button>
@@ -714,7 +714,7 @@ export default function PlayerProgressionPage({
                         setResetConfirm(ch.id);
                       }}
                       disabled={!hasData}
-                      className={`px-3 py-1.5 border font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer ${
+                      className={`px-3 py-2.5 border font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer ${
                         hasData
                           ? "border-red-dim/40 text-red hover:bg-red/10 hover:border-red-dim"
                           : "border-border/30 text-text-muted/30 cursor-not-allowed"
