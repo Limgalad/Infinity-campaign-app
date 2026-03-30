@@ -553,6 +553,82 @@ export async function resetPlayerCebSkills(formData: FormData): Promise<{ succes
   return { success: true };
 }
 
+// ─── Spec-Ops Reset (Admin) ────────────────────────────────
+
+export async function resetPlayerSpecOps(formData: FormData): Promise<{ success?: boolean; error?: string }> {
+  const supabase = await createClient();
+
+  const playerId = formData.get("playerId") as string;
+  const campaignId = formData.get("campaignId") as string;
+
+  if (!playerId || !campaignId) return { error: "Missing player or campaign ID" };
+
+  // Delete all spec-ops entries for this player in this campaign
+  const { error: specError } = await supabase
+    .from("spec_ops")
+    .delete()
+    .eq("player_id", playerId)
+    .eq("campaign_id", campaignId);
+
+  if (specError) return { error: specError.message };
+
+  // Remove all spec-ops XP ledger entries (refund the XP)
+  await supabase
+    .from("xp_ledger")
+    .delete()
+    .eq("player_id", playerId)
+    .eq("campaign_id", campaignId)
+    .eq("source", "specops_upgrade");
+
+  revalidatePath("/dashboard/admin/players");
+  revalidatePath(`/dashboard/campaigns/${campaignId}`);
+  revalidatePath("/dashboard");
+  return { success: true };
+}
+
+// ─── Consumables Reset (Admin) ─────────────────────────────
+
+export async function resetPlayerConsumables(formData: FormData): Promise<{ success?: boolean; error?: string }> {
+  const supabase = await createClient();
+
+  const playerId = formData.get("playerId") as string;
+  const campaignId = formData.get("campaignId") as string;
+
+  if (!playerId || !campaignId) return { error: "Missing player or campaign ID" };
+
+  // Get all chapters in this campaign to find consumables
+  const { data: chapters } = await supabase
+    .from("chapters")
+    .select("id")
+    .eq("campaign_id", campaignId);
+
+  const chapterIds = (chapters ?? []).map((c) => c.id);
+
+  if (chapterIds.length > 0) {
+    // Delete all consumables for this player across campaign chapters
+    const { error: consError } = await supabase
+      .from("consumables")
+      .delete()
+      .eq("player_id", playerId)
+      .in("chapter_id", chapterIds);
+
+    if (consError) return { error: consError.message };
+  }
+
+  // Remove all consumable XP ledger entries (refund the XP)
+  await supabase
+    .from("xp_ledger")
+    .delete()
+    .eq("player_id", playerId)
+    .eq("campaign_id", campaignId)
+    .eq("source", "consumable_purchase");
+
+  revalidatePath("/dashboard/admin/players");
+  revalidatePath(`/dashboard/campaigns/${campaignId}`);
+  revalidatePath("/dashboard");
+  return { success: true };
+}
+
 export async function overrideCommanderLevel(formData: FormData) {
   const supabase = await createClient();
 

@@ -126,6 +126,11 @@ export default function ChapterPage({
   const [strikeTeamWin, setStrikeTeamWin] = useState(false);
   const [promotionRoll, setPromotionRoll] = useState<number | null>(null);
 
+  // Pending CEB selections (local only, not committed yet)
+  const [pendingCEB, setPendingCEB] = useState<{ columnType: string; level: number; action: "add" | "remove" }[]>([]);
+  // Pending consumable selections
+  const [pendingConsumables, setPendingConsumables] = useState<ConsumableType[]>([]);
+
   // Spec-Ops form state
   const [showAddSkill, setShowAddSkill] = useState(false);
   const [newSkillName, setNewSkillName] = useState("");
@@ -144,95 +149,99 @@ export default function ChapterPage({
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) { setLoading(false); return; }
 
-    const [
-      { data: camp },
-      { data: chap },
-      { data: ceb },
-      { data: promo },
-      { data: specs },
-    ] = await Promise.all([
-      supabase.from("campaigns").select("*").eq("id", campaignId).single(),
-      supabase.from("chapters").select("*").eq("campaign_id", campaignId).eq("chapter_number", chapterNumber).single(),
-      supabase.from("command_experience").select("*").eq("player_id", user.id).eq("campaign_id", campaignId).order("column_type").order("level"),
-      supabase.from("commander_promotions").select("*").eq("player_id", user.id).eq("campaign_id", campaignId).single(),
-      supabase.from("spec_ops").select("*").eq("player_id", user.id).eq("campaign_id", campaignId).order("created_at"),
-    ]);
-
-    setCampaign(camp as Campaign | null);
-    setChapter(chap as Chapter | null);
-    setCommanderLevel((promo as CommanderPromotion | null)?.current_level ?? 0);
-    setSpecOps((specs as SpecOps[]) ?? []);
-
-    // Build CEB map with xp_cost info
-    const cebMap: Record<string, { level: number; xp_cost: number }[]> = {};
-    for (const entry of (ceb as CommandExperience[]) ?? []) {
-      if (!cebMap[entry.column_type]) cebMap[entry.column_type] = [];
-      cebMap[entry.column_type].push({ level: entry.level, xp_cost: entry.xp_cost });
-    }
-    setPurchasedCEB(cebMap);
-
-    if (chap) {
-      const chapData = chap as Chapter;
-      const [{ data: gameResult }, { data: consumables }] = await Promise.all([
-        supabase.from("game_results").select("*").eq("player_id", user.id).eq("chapter_id", chapData.id).limit(1).single(),
-        supabase.from("consumables").select("*").eq("player_id", user.id).eq("chapter_id", chapData.id),
+    try {
+      const [
+        { data: camp },
+        { data: chap },
+        { data: ceb },
+        { data: promo },
+        { data: specs },
+      ] = await Promise.all([
+        supabase.from("campaigns").select("*").eq("id", campaignId).single(),
+        supabase.from("chapters").select("*").eq("campaign_id", campaignId).eq("chapter_number", chapterNumber).single(),
+        supabase.from("command_experience").select("*").eq("player_id", user.id).eq("campaign_id", campaignId).order("column_type").order("level"),
+        supabase.from("commander_promotions").select("*").eq("player_id", user.id).eq("campaign_id", campaignId).maybeSingle(),
+        supabase.from("spec_ops").select("*").eq("player_id", user.id).eq("campaign_id", campaignId).order("created_at"),
       ]);
 
-      setExistingResult(gameResult as GameResult | null);
-      setPurchasedConsumables(((consumables as Consumable[]) ?? []).map((c) => c.consumable_type));
+      setCampaign(camp as Campaign | null);
+      setChapter(chap as Chapter | null);
+      setCommanderLevel((promo as CommanderPromotion | null)?.current_level ?? 0);
+      setSpecOps((specs as SpecOps[]) ?? []);
 
-      // Load match info
-      const { data: allMatches } = await supabase.from("matches").select("*").eq("chapter_id", chapData.id);
-      if (allMatches && allMatches.length > 0) {
-        const { data: playerTeams } = await supabase
-          .from("strike_teams")
-          .select("*, player1:players!strike_teams_player1_id_fkey(display_name, faction), player2:players!strike_teams_player2_id_fkey(display_name, faction)")
-          .eq("campaign_id", campaignId)
-          .or(`player1_id.eq.${user.id},player2_id.eq.${user.id}`);
+      // Build CEB map with xp_cost info
+      const cebMap: Record<string, { level: number; xp_cost: number }[]> = {};
+      for (const entry of (ceb as CommandExperience[]) ?? []) {
+        if (!cebMap[entry.column_type]) cebMap[entry.column_type] = [];
+        cebMap[entry.column_type].push({ level: entry.level, xp_cost: entry.xp_cost });
+      }
+      setPurchasedCEB(cebMap);
 
-        if (playerTeams && playerTeams.length > 0) {
-          const myTeam = playerTeams[0];
-          const myMatch = allMatches.find(
-            (m: { strike_team_1_id: string; strike_team_2_id: string }) =>
-              m.strike_team_1_id === myTeam.id || m.strike_team_2_id === myTeam.id
-          );
-          if (myMatch) {
-            const opponentTeamId = myMatch.strike_team_1_id === myTeam.id ? myMatch.strike_team_2_id : myMatch.strike_team_1_id;
-            const { data: oppTeam } = await supabase
-              .from("strike_teams")
-              .select("*, player1:players!strike_teams_player1_id_fkey(display_name, faction), player2:players!strike_teams_player2_id_fkey(display_name, faction)")
-              .eq("id", opponentTeamId)
-              .single();
-            const p1 = myTeam.player1 as unknown as { display_name: string; faction: string | null } | null;
-            const p2 = myTeam.player2 as unknown as { display_name: string; faction: string | null } | null;
-            const o1 = oppTeam?.player1 as unknown as { display_name: string; faction: string | null } | null;
-            const o2 = oppTeam?.player2 as unknown as { display_name: string; faction: string | null } | null;
-            setMatchInfo({
-              status: myMatch.status,
-              yourTeam: { name: myTeam.name, player1: p1?.display_name ?? "Unknown", player2: p2?.display_name ?? "Unknown", faction1: p1?.faction ?? null, faction2: p2?.faction ?? null },
-              opponentTeam: { name: oppTeam?.name ?? "Unknown", player1: o1?.display_name ?? "Unknown", player2: o2?.display_name ?? "Unknown", faction1: o1?.faction ?? null, faction2: o2?.faction ?? null },
-            });
+      if (chap) {
+        const chapData = chap as Chapter;
+        const [{ data: gameResult }, { data: consumables }] = await Promise.all([
+          supabase.from("game_results").select("*").eq("player_id", user.id).eq("chapter_id", chapData.id).limit(1).maybeSingle(),
+          supabase.from("consumables").select("*").eq("player_id", user.id).eq("chapter_id", chapData.id),
+        ]);
+
+        setExistingResult(gameResult as GameResult | null);
+        setPurchasedConsumables(((consumables as Consumable[]) ?? []).map((c) => c.consumable_type));
+
+        // Load match info
+        const { data: allMatches } = await supabase.from("matches").select("*").eq("chapter_id", chapData.id);
+        if (allMatches && allMatches.length > 0) {
+          const { data: playerTeams } = await supabase
+            .from("strike_teams")
+            .select("*, player1:players!strike_teams_player1_id_fkey(display_name, faction), player2:players!strike_teams_player2_id_fkey(display_name, faction)")
+            .eq("campaign_id", campaignId)
+            .or(`player1_id.eq.${user.id},player2_id.eq.${user.id}`);
+
+          if (playerTeams && playerTeams.length > 0) {
+            const myTeam = playerTeams[0];
+            const myMatch = allMatches.find(
+              (m: { strike_team_1_id: string; strike_team_2_id: string }) =>
+                m.strike_team_1_id === myTeam.id || m.strike_team_2_id === myTeam.id
+            );
+            if (myMatch) {
+              const opponentTeamId = myMatch.strike_team_1_id === myTeam.id ? myMatch.strike_team_2_id : myMatch.strike_team_1_id;
+              const { data: oppTeam } = await supabase
+                .from("strike_teams")
+                .select("*, player1:players!strike_teams_player1_id_fkey(display_name, faction), player2:players!strike_teams_player2_id_fkey(display_name, faction)")
+                .eq("id", opponentTeamId)
+                .maybeSingle();
+              const p1 = myTeam.player1 as unknown as { display_name: string; faction: string | null } | null;
+              const p2 = myTeam.player2 as unknown as { display_name: string; faction: string | null } | null;
+              const o1 = oppTeam?.player1 as unknown as { display_name: string; faction: string | null } | null;
+              const o2 = oppTeam?.player2 as unknown as { display_name: string; faction: string | null } | null;
+              setMatchInfo({
+                status: myMatch.status,
+                yourTeam: { name: myTeam.name, player1: p1?.display_name ?? "Unknown", player2: p2?.display_name ?? "Unknown", faction1: p1?.faction ?? null, faction2: p2?.faction ?? null },
+                opponentTeam: { name: oppTeam?.name ?? "Unknown", player1: o1?.display_name ?? "Unknown", player2: o2?.display_name ?? "Unknown", faction1: o1?.faction ?? null, faction2: o2?.faction ?? null },
+              });
+            }
           }
+        }
+
+        if (gameResult) {
+          const gr = gameResult as GameResult;
+          setObjectivePoints(gr.objective_points);
+          setResult(gr.result);
+          setArmySurvived(gr.army_percentage_survived != null ? Math.round((gr.army_percentage_survived / 100) * 300) : 150);
+          setEnemySurvived(gr.enemy_percentage_survived != null ? Math.round((gr.enemy_percentage_survived / 100) * 300) : 150);
         }
       }
 
-      if (gameResult) {
-        const gr = gameResult as GameResult;
-        setObjectivePoints(gr.objective_points);
-        setResult(gr.result);
-        setArmySurvived(gr.army_percentage_survived != null ? Math.round((gr.army_percentage_survived / 100) * 300) : 150);
-        setEnemySurvived(gr.enemy_percentage_survived != null ? Math.round((gr.enemy_percentage_survived / 100) * 300) : 150);
-      }
+      // Load XP summary
+      const { data: ledger } = await supabase.from("xp_ledger").select("amount").eq("player_id", user.id).eq("campaign_id", campaignId);
+      const entries = (ledger ?? []) as { amount: number }[];
+      const totalEarned = entries.filter((e) => e.amount > 0).reduce((sum, e) => sum + e.amount, 0);
+      const totalSpent = Math.abs(entries.filter((e) => e.amount < 0).reduce((sum, e) => sum + e.amount, 0));
+      setXpSummary({ total: totalEarned, spent: totalSpent, available: totalEarned - totalSpent });
+    } catch (err) {
+      console.error("Failed to load chapter data:", err);
     }
-
-    // Load XP summary
-    const { data: ledger } = await supabase.from("xp_ledger").select("amount").eq("player_id", user.id).eq("campaign_id", campaignId);
-    const entries = (ledger ?? []) as { amount: number }[];
-    const totalEarned = entries.filter((e) => e.amount > 0).reduce((sum, e) => sum + e.amount, 0);
-    const totalSpent = Math.abs(entries.filter((e) => e.amount < 0).reduce((sum, e) => sum + e.amount, 0));
-    setXpSummary({ total: totalEarned, spent: totalSpent, available: totalEarned - totalSpent });
 
     setLoading(false);
   }
@@ -314,78 +323,169 @@ export default function ChapterPage({
     }
   }
 
-  async function handleToggleCEB(columnType: string, level: number) {
-    if (!chapter) return;
-    const isPurchased = isCebPurchased(columnType, level);
-
-    if (isPurchased) {
-      // Deselect
-      const formData = new FormData();
-      formData.set("campaignId", campaignId);
-      formData.set("columnType", columnType);
-      formData.set("level", level.toString());
-      formData.set("chapterId", chapter.id);
-      const res = await removeCebLevel(formData);
-      if (res.error) {
-        toast(res.error, "error");
-      } else {
-        toast(`Removed ${columnType.replace(/_/g, " ")} L${level}`);
-        loadData();
+  // Toggle CEB in pending state (local only)
+  function handleToggleCEB(columnType: string, level: number) {
+    setPendingCEB((prev) => {
+      // Check if there's already a pending action for this cell
+      const existingIdx = prev.findIndex((p) => p.columnType === columnType && p.level === level);
+      if (existingIdx >= 0) {
+        // Cancel the pending action
+        return prev.filter((_, i) => i !== existingIdx);
       }
-    } else {
-      // Check if this qualifies as a free pick
-      const freeSlot = freeSkillSlots.find((s) => s.level === level);
-      const currentFreeCount = freePicksCount[level] ?? 0;
-      const isFree = freeSlot && currentFreeCount < freeSlot.count;
-
-      if (isFree) {
-        const formData = new FormData();
-        formData.set("campaignId", campaignId);
-        formData.set("columnType", columnType);
-        formData.set("level", level.toString());
-        formData.set("chapterNumber", chapterNumber.toString());
-        const res = await selectFreeCebSkill(formData);
-        if (res.error) {
-          toast(res.error, "error");
-        } else {
-          toast(`Free skill: ${columnType.replace(/_/g, " ")} L${level}`);
-          loadData();
-        }
+      const isOwned = isCebPurchased(columnType, level);
+      if (isOwned) {
+        return [...prev, { columnType, level, action: "remove" }];
       } else {
-        // Paid purchase
-        const xpCost = CEB_LEVEL_COSTS[level];
-        const formData = new FormData();
-        formData.set("campaignId", campaignId);
-        formData.set("columnType", columnType);
-        formData.set("level", level.toString());
-        formData.set("xpCost", xpCost.toString());
-        formData.set("chapterNumber", chapterNumber.toString());
-        formData.set("chapterId", chapter.id);
-        const res = await purchaseCebLevel(formData);
-        if (res.error) {
-          toast(res.error, "error");
-        } else {
-          toast(`Purchased ${columnType.replace(/_/g, " ")} L${level}`);
-          loadData();
-        }
+        return [...prev, { columnType, level, action: "add" }];
       }
-    }
+    });
   }
 
-  async function handlePurchaseConsumable(consumableType: ConsumableType, cost: number) {
-    if (!chapter) return;
-    const formData = new FormData();
-    formData.set("campaignId", campaignId);
-    formData.set("chapterId", chapter.id);
-    formData.set("consumableType", consumableType);
-    formData.set("xpCost", cost.toString());
-    const res = await purchaseConsumable(formData);
-    if (res.error) {
-      toast(res.error, "error");
-    } else {
-      toast(`Purchased ${consumableType.replace(/_/g, " ")}`);
-      loadData();
+  // Toggle consumable in pending state (local only)
+  function handleToggleConsumable(consumableType: ConsumableType) {
+    setPendingConsumables((prev) =>
+      prev.includes(consumableType)
+        ? prev.filter((c) => c !== consumableType)
+        : [...prev, consumableType]
+    );
+  }
+
+  // Compute effective CEB state (purchased + pending adds - pending removes)
+  function isEffectiveCebPurchased(colKey: string, level: number): boolean {
+    const owned = isCebPurchased(colKey, level);
+    const pending = pendingCEB.find((p) => p.columnType === colKey && p.level === level);
+    if (pending) return pending.action === "add";
+    return owned;
+  }
+
+  function isCebPending(colKey: string, level: number): boolean {
+    return pendingCEB.some((p) => p.columnType === colKey && p.level === level);
+  }
+
+  // Calculate pending XP cost
+  const pendingCebXpCost = useMemo(() => {
+    let cost = 0;
+    for (const p of pendingCEB) {
+      if (p.action === "add") {
+        // Check if it would be free
+        const freeSlot = freeSkillSlots.find((s) => s.level === p.level);
+        // Count existing free + pending free adds at this level
+        const existingFree = freePicksCount[p.level] ?? 0;
+        const pendingFreeAdds = pendingCEB
+          .filter((pp) => pp.action === "add" && pp.level === p.level)
+          .indexOf(p);
+        const totalFreeUsed = existingFree + pendingFreeAdds;
+        const isFree = freeSlot && totalFreeUsed < freeSlot.count;
+        if (!isFree) {
+          cost += CEB_LEVEL_COSTS[p.level] ?? 0;
+        }
+      } else {
+        // Removing: refund (only if it was paid)
+        const entry = purchasedCEB[p.columnType]?.find((e) => e.level === p.level);
+        if (entry && entry.xp_cost > 0) {
+          cost -= entry.xp_cost;
+        }
+      }
     }
+    return cost;
+  }, [pendingCEB, freeSkillSlots, freePicksCount, purchasedCEB]);
+
+  const pendingConsumableXpCost = useMemo(() => {
+    return pendingConsumables.reduce((sum, key) => {
+      const def = CONSUMABLE_DEFS.find((c) => c.key === key);
+      return sum + (def?.cost ?? 0);
+    }, 0);
+  }, [pendingConsumables]);
+
+  const hasPendingChanges = pendingCEB.length > 0 || pendingConsumables.length > 0;
+
+  // Confirm all pending changes
+  async function handleConfirmChanges() {
+    if (!chapter) return;
+    setSubmitting(true);
+
+    // Process CEB changes
+    for (const p of pendingCEB) {
+      if (p.action === "remove") {
+        const formData = new FormData();
+        formData.set("campaignId", campaignId);
+        formData.set("columnType", p.columnType);
+        formData.set("level", p.level.toString());
+        formData.set("chapterId", chapter.id);
+        const res = await removeCebLevel(formData);
+        if (res.error) {
+          toast(res.error, "error");
+          setSubmitting(false);
+          return;
+        }
+      } else {
+        // Add — check if free
+        const freeSlot = freeSkillSlots.find((s) => s.level === p.level);
+        const existingFree = freePicksCount[p.level] ?? 0;
+        const pendingFreeAdds = pendingCEB
+          .filter((pp) => pp.action === "add" && pp.level === p.level);
+        const myIndex = pendingFreeAdds.indexOf(p);
+        const totalFreeUsed = existingFree + myIndex;
+        const isFree = freeSlot && totalFreeUsed < freeSlot.count;
+
+        if (isFree) {
+          const formData = new FormData();
+          formData.set("campaignId", campaignId);
+          formData.set("columnType", p.columnType);
+          formData.set("level", p.level.toString());
+          formData.set("chapterNumber", chapterNumber.toString());
+          const res = await selectFreeCebSkill(formData);
+          if (res.error) {
+            toast(res.error, "error");
+            setSubmitting(false);
+            return;
+          }
+        } else {
+          const xpCost = CEB_LEVEL_COSTS[p.level];
+          const formData = new FormData();
+          formData.set("campaignId", campaignId);
+          formData.set("columnType", p.columnType);
+          formData.set("level", p.level.toString());
+          formData.set("xpCost", xpCost.toString());
+          formData.set("chapterNumber", chapterNumber.toString());
+          formData.set("chapterId", chapter.id);
+          const res = await purchaseCebLevel(formData);
+          if (res.error) {
+            toast(res.error, "error");
+            setSubmitting(false);
+            return;
+          }
+        }
+      }
+    }
+
+    // Process consumable purchases
+    for (const consumableType of pendingConsumables) {
+      const def = CONSUMABLE_DEFS.find((c) => c.key === consumableType);
+      if (!def) continue;
+      const formData = new FormData();
+      formData.set("campaignId", campaignId);
+      formData.set("chapterId", chapter.id);
+      formData.set("consumableType", consumableType);
+      formData.set("xpCost", def.cost.toString());
+      const res = await purchaseConsumable(formData);
+      if (res.error) {
+        toast(res.error, "error");
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    setPendingCEB([]);
+    setPendingConsumables([]);
+    setSubmitting(false);
+    toast("Changes confirmed!");
+    loadData();
+  }
+
+  function handleCancelChanges() {
+    setPendingCEB([]);
+    setPendingConsumables([]);
   }
 
   async function handleAddSkill() {
@@ -797,43 +897,52 @@ export default function ChapterPage({
 
             {[1, 2, 3, 4].map((level) =>
               CEB_COLUMNS.map((col) => {
-                const isPurchased = isCebPurchased(col.key, level);
+                const isOwned = isCebPurchased(col.key, level);
                 const isFree = isCebFree(col.key, level);
-                const previousOwned = level === 1 || isCebPurchased(col.key, level - 1);
-                // Check if free pick available for this level
+                const isPending = isCebPending(col.key, level);
+                const isEffective = isEffectiveCebPurchased(col.key, level);
+                const previousOwned = level === 1 || isEffectiveCebPurchased(col.key, level - 1);
                 const freeSlot = freeSkillSlots.find((s) => s.level === level);
                 const currentFreeCount = freePicksCount[level] ?? 0;
                 const hasFreeSlot = freeSlot && currentFreeCount < freeSlot.count;
-                const canAfford = hasFreeSlot || xpSummary.available >= CEB_LEVEL_COSTS[level];
-                const canPurchase = !isPurchased && previousOwned && canAfford;
-                const canDeselect = isPurchased && !hasSubmitted;
+                const canAfford = hasFreeSlot || (xpSummary.available - pendingCebXpCost - pendingConsumableXpCost) >= CEB_LEVEL_COSTS[level];
+                const canToggle = isEffective ? !hasSubmitted : (previousOwned && canAfford);
                 const levelDesc = col.levels[level - 1];
 
                 return (
                   <button
                     key={`${col.key}-${level}`}
-                    disabled={!canPurchase && !canDeselect}
-                    onClick={() => (canPurchase || canDeselect) && handleToggleCEB(col.key, level)}
+                    disabled={!canToggle}
+                    onClick={() => canToggle && handleToggleCEB(col.key, level)}
                     className={`relative p-2 sm:p-2.5 border text-left transition-all duration-200 min-h-[60px] sm:min-h-[72px] cursor-pointer ${
-                      isPurchased
-                        ? isFree
-                          ? "bg-green/15 border-green-dim/40 hover:border-green"
-                          : "bg-cyan/15 border-cyan-dim/40 hover:border-cyan"
-                        : canPurchase
-                          ? hasFreeSlot
-                            ? "bg-surface/50 border-green-dim/30 hover:border-green hover:bg-green/5"
-                            : "bg-surface/50 border-border hover:border-amber-dim hover:bg-amber/5"
-                          : "bg-surface/20 border-border/30 opacity-40 cursor-not-allowed"
+                      isPending
+                        ? isEffective
+                          ? "bg-amber/15 border-amber border-dashed"
+                          : "bg-red/10 border-red-dim border-dashed"
+                        : isOwned
+                          ? isFree
+                            ? "bg-green/15 border-green-dim/40 hover:border-green"
+                            : "bg-cyan/15 border-cyan-dim/40 hover:border-cyan"
+                          : canToggle
+                            ? hasFreeSlot
+                              ? "bg-surface/50 border-green-dim/30 hover:border-green hover:bg-green/5"
+                              : "bg-surface/50 border-border hover:border-amber-dim hover:bg-amber/5"
+                            : "bg-surface/20 border-border/30 opacity-40 cursor-not-allowed"
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className={`font-[family-name:var(--font-mono)] text-xs font-bold ${isPurchased ? (isFree ? "text-green" : "text-cyan") : "text-text-muted"}`}>L{level}</span>
-                      <span className={`font-[family-name:var(--font-mono)] text-xs ${isPurchased ? (isFree ? "text-green-dim" : "text-cyan-dim") : "text-text-muted"}`}>
-                        {isFree ? "FREE" : `${CEB_LEVEL_COSTS[level]} XP`}
+                      <span className={`font-[family-name:var(--font-mono)] text-xs font-bold ${isEffective ? (isPending ? "text-amber" : isFree ? "text-green" : "text-cyan") : isPending ? "text-red" : "text-text-muted"}`}>L{level}</span>
+                      <span className={`font-[family-name:var(--font-mono)] text-xs ${isEffective ? (isPending ? "text-amber" : isFree ? "text-green-dim" : "text-cyan-dim") : "text-text-muted"}`}>
+                        {isFree && isOwned && !isPending ? "FREE" : `${CEB_LEVEL_COSTS[level]} XP`}
                       </span>
                     </div>
-                    <div className={`font-[family-name:var(--font-mono)] text-xs leading-snug ${isPurchased ? "text-text-primary" : "text-text-secondary"}`}>{levelDesc}</div>
-                    {isPurchased && (
+                    <div className={`font-[family-name:var(--font-mono)] text-xs leading-snug ${isEffective ? "text-text-primary" : "text-text-secondary"}`}>{levelDesc}</div>
+                    {isPending && (
+                      <div className={`absolute top-1 right-1 px-1 py-0.5 ${isEffective ? "bg-amber" : "bg-red"} font-[family-name:var(--font-mono)] text-[9px] text-void font-bold`}>
+                        {isEffective ? "NEW" : "DEL"}
+                      </div>
+                    )}
+                    {isOwned && !isPending && (
                       <div className={`absolute top-1 right-1 w-4 h-4 ${isFree ? "bg-green" : "bg-cyan"} flex items-center justify-center`}>
                         <svg className="w-2.5 h-2.5 text-void" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="square" d="M5 13l4 4L19 7" /></svg>
                       </div>
@@ -846,35 +955,51 @@ export default function ChapterPage({
 
           {/* Level 5 */}
           {(() => {
-            const anyL5Purchased = CEB_COLUMNS.some((col) => isCebPurchased(col.key, 5));
-            const anyColumnHasL4 = CEB_COLUMNS.some((col) => isCebPurchased(col.key, 4));
-            const canPurchaseL5 = !anyL5Purchased && anyColumnHasL4 && xpSummary.available >= CEB_LEVEL_COSTS[5];
+            const anyL5Owned = CEB_COLUMNS.some((col) => isCebPurchased(col.key, 5));
+            const l5Pending = pendingCEB.find((p) => p.level === 5);
+            const anyL5Effective = CEB_COLUMNS.some((col) => isEffectiveCebPurchased(col.key, 5));
+            const anyColumnHasL4 = CEB_COLUMNS.some((col) => isEffectiveCebPurchased(col.key, 4));
+            const canPurchaseL5 = !anyL5Effective && anyColumnHasL4 && (xpSummary.available - pendingCebXpCost - pendingConsumableXpCost) >= CEB_LEVEL_COSTS[5];
+            const canToggle = anyL5Effective || canPurchaseL5;
             return (
               <button
-                disabled={!canPurchaseL5 && !anyL5Purchased}
+                disabled={!canToggle}
                 onClick={() => {
-                  if (anyL5Purchased) {
+                  if (anyL5Owned && !l5Pending) {
                     const c = CEB_COLUMNS.find((col) => isCebPurchased(col.key, 5));
                     if (c) handleToggleCEB(c.key, 5);
+                  } else if (l5Pending) {
+                    handleToggleCEB(l5Pending.columnType, 5);
                   } else if (canPurchaseL5) {
-                    const c = CEB_COLUMNS.find((col) => isCebPurchased(col.key, 4));
+                    const c = CEB_COLUMNS.find((col) => isEffectiveCebPurchased(col.key, 4));
                     if (c) handleToggleCEB(c.key, 5);
                   }
                 }}
                 className={`mt-2 w-full relative p-3 sm:p-4 border text-center transition-all duration-200 cursor-pointer ${
-                  anyL5Purchased ? "bg-cyan/15 border-cyan-dim/40 hover:border-cyan"
-                    : canPurchaseL5 ? "bg-surface/50 border-border hover:border-amber-dim hover:bg-amber/5"
-                    : "bg-surface/20 border-border/30 opacity-40 cursor-not-allowed"
+                  l5Pending
+                    ? anyL5Effective
+                      ? "bg-amber/15 border-amber border-dashed"
+                      : "bg-red/10 border-red-dim border-dashed"
+                    : anyL5Owned
+                      ? "bg-cyan/15 border-cyan-dim/40 hover:border-cyan"
+                      : canPurchaseL5
+                        ? "bg-surface/50 border-border hover:border-amber-dim hover:bg-amber/5"
+                        : "bg-surface/20 border-border/30 opacity-40 cursor-not-allowed"
                 }`}
               >
                 <div className="flex items-center justify-center gap-4 mb-1">
-                  <span className={`font-[family-name:var(--font-mono)] text-xs font-bold ${anyL5Purchased ? "text-cyan" : "text-text-muted"}`}>L5</span>
-                  <span className={`font-[family-name:var(--font-mono)] text-xs ${anyL5Purchased ? "text-cyan-dim" : "text-text-muted"}`}>{CEB_LEVEL_COSTS[5]} XP</span>
+                  <span className={`font-[family-name:var(--font-mono)] text-xs font-bold ${anyL5Effective ? (l5Pending ? "text-amber" : "text-cyan") : l5Pending ? "text-red" : "text-text-muted"}`}>L5</span>
+                  <span className={`font-[family-name:var(--font-mono)] text-xs ${anyL5Effective ? (l5Pending ? "text-amber" : "text-cyan-dim") : "text-text-muted"}`}>{CEB_LEVEL_COSTS[5]} XP</span>
                 </div>
-                <div className={`font-[family-name:var(--font-mono)] text-xs leading-snug ${anyL5Purchased ? "text-text-primary" : "text-text-secondary"}`}>
+                <div className={`font-[family-name:var(--font-mono)] text-xs leading-snug ${anyL5Effective ? "text-text-primary" : "text-text-secondary"}`}>
                   Enemy must ID their Lieutenant during deployment &bull; +15 Army Points
                 </div>
-                {anyL5Purchased && (
+                {l5Pending && (
+                  <div className={`absolute top-2 right-2 px-1 py-0.5 ${anyL5Effective ? "bg-amber" : "bg-red"} font-[family-name:var(--font-mono)] text-[9px] text-void font-bold`}>
+                    {anyL5Effective ? "NEW" : "DEL"}
+                  </div>
+                )}
+                {anyL5Owned && !l5Pending && (
                   <div className="absolute top-2 right-2 w-4 h-4 bg-cyan flex items-center justify-center">
                     <svg className="w-2.5 h-2.5 text-void" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="square" d="M5 13l4 4L19 7" /></svg>
                   </div>
@@ -986,28 +1111,76 @@ export default function ChapterPage({
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
           {CONSUMABLE_DEFS.map((consumable) => {
-            const isPurchased = purchasedConsumables.includes(consumable.key);
-            const canAfford = xpSummary.available >= consumable.cost;
+            const isOwned = purchasedConsumables.includes(consumable.key);
+            const isPending = pendingConsumables.includes(consumable.key);
+            const canAfford = !isOwned && (xpSummary.available - pendingCebXpCost - pendingConsumableXpCost + (isPending ? consumable.cost : 0)) >= consumable.cost;
+            const canToggle = isOwned ? false : (isPending || canAfford);
             return (
-              <button key={consumable.key} disabled={isPurchased || !canAfford} onClick={() => !isPurchased && canAfford && handlePurchaseConsumable(consumable.key, consumable.cost)}
-                className={`p-3 sm:p-4 border text-left transition-all duration-200 cursor-pointer ${
-                  isPurchased ? "bg-red/10 border-red-dim/40" : canAfford ? "bg-surface/30 border-border/50 hover:border-amber-dim hover:bg-amber/5" : "bg-surface/20 border-border/30 opacity-40 cursor-not-allowed"
+              <button key={consumable.key} disabled={isOwned || (!isPending && !canAfford)} onClick={() => canToggle && handleToggleConsumable(consumable.key)}
+                className={`relative p-3 sm:p-4 border text-left transition-all duration-200 cursor-pointer ${
+                  isOwned
+                    ? "bg-red/10 border-red-dim/40 cursor-not-allowed"
+                    : isPending
+                      ? "bg-amber/15 border-amber border-dashed"
+                      : canAfford
+                        ? "bg-surface/30 border-border/50 hover:border-amber-dim hover:bg-amber/5"
+                        : "bg-surface/20 border-border/30 opacity-40 cursor-not-allowed"
                 }`}>
                 <div className="flex items-center justify-between mb-2">
-                  <span className={`font-[family-name:var(--font-orbitron)] text-xs tracking-wider ${isPurchased ? "text-red" : "text-text-primary"}`}>{consumable.label.toUpperCase()}</span>
-                  <span className={`font-[family-name:var(--font-mono)] text-xs font-bold ${isPurchased ? "text-red-dim" : "text-amber"}`}>{consumable.cost} XP</span>
+                  <span className={`font-[family-name:var(--font-orbitron)] text-xs tracking-wider ${isOwned ? "text-red" : isPending ? "text-amber" : "text-text-primary"}`}>{consumable.label.toUpperCase()}</span>
+                  <span className={`font-[family-name:var(--font-mono)] text-xs font-bold ${isOwned ? "text-red-dim" : isPending ? "text-amber" : "text-amber"}`}>{consumable.cost} XP</span>
                 </div>
-                <div className={`font-[family-name:var(--font-mono)] text-xs leading-relaxed ${isPurchased ? "text-text-muted" : "text-text-secondary"}`}>{consumable.description}</div>
-                {isPurchased && (
+                <div className={`font-[family-name:var(--font-mono)] text-xs leading-relaxed ${isOwned ? "text-text-muted" : "text-text-secondary"}`}>{consumable.description}</div>
+                {isOwned && (
                   <div className="mt-2 inline-flex items-center gap-1 px-2 py-1 bg-red-dim/20 border border-red-dim/30">
                     <span className="font-[family-name:var(--font-mono)] text-xs text-red tracking-wider uppercase">PURCHASED</span>
                   </div>
+                )}
+                {isPending && (
+                  <div className="absolute top-1 right-1 px-1 py-0.5 bg-amber font-[family-name:var(--font-mono)] text-[9px] text-void font-bold">NEW</div>
                 )}
               </button>
             );
           })}
         </div>
       </div>
+
+      {/* ═══════════════════════════════════════════════════════ */}
+      {/* STICKY CONFIRM BAR                                      */}
+      {/* ═══════════════════════════════════════════════════════ */}
+      {hasPendingChanges && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 bg-void/95 border-t-2 border-amber backdrop-blur-sm">
+          <div className="max-w-5xl mx-auto px-4 py-3 flex flex-col sm:flex-row items-center gap-3">
+            <div className="flex-1 flex flex-wrap items-center gap-3">
+              <span className="font-[family-name:var(--font-orbitron)] text-xs tracking-wider text-amber">PENDING CHANGES</span>
+              <div className="flex items-center gap-2">
+                {pendingCEB.length > 0 && (
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-secondary px-2 py-0.5 bg-surface-bright border border-border">
+                    {pendingCEB.filter((p) => p.action === "add").length} CEB add{pendingCEB.filter((p) => p.action === "add").length !== 1 ? "s" : ""}
+                    {pendingCEB.filter((p) => p.action === "remove").length > 0 && `, ${pendingCEB.filter((p) => p.action === "remove").length} remove`}
+                  </span>
+                )}
+                {pendingConsumables.length > 0 && (
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-text-secondary px-2 py-0.5 bg-surface-bright border border-border">
+                    {pendingConsumables.length} consumable{pendingConsumables.length !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
+              <span className={`font-[family-name:var(--font-mono)] text-xs font-bold ${(pendingCebXpCost + pendingConsumableXpCost) > 0 ? "text-red" : "text-green"}`}>
+                {(pendingCebXpCost + pendingConsumableXpCost) > 0 ? "-" : "+"}{Math.abs(pendingCebXpCost + pendingConsumableXpCost)} XP
+              </span>
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button onClick={handleCancelChanges} className="flex-1 sm:flex-initial px-5 py-2.5 border border-border text-text-muted font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase hover:text-text-secondary hover:border-border-bright transition-all cursor-pointer">
+                CANCEL
+              </button>
+              <button onClick={handleConfirmChanges} disabled={submitting} className="flex-1 sm:flex-initial px-6 py-2.5 bg-amber/20 border-2 border-amber text-amber font-[family-name:var(--font-orbitron)] text-xs tracking-[0.15em] uppercase hover:bg-amber/30 hover:shadow-[0_0_16px_rgba(245,158,11,0.25)] transition-all cursor-pointer disabled:opacity-50">
+                {submitting ? "CONFIRMING..." : "CONFIRM CHANGES"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

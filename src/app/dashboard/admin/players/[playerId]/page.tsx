@@ -8,6 +8,8 @@ import {
   resetPlayerChapter,
   overrideCommanderLevel,
   resetPlayerCebSkills,
+  resetPlayerSpecOps,
+  resetPlayerConsumables,
 } from "../../actions";
 import { useToast } from "@/components/toast";
 import type {
@@ -43,6 +45,8 @@ export default function PlayerProgressionPage({
   const [showCommanderOverride, setShowCommanderOverride] = useState(false);
   const [resetConfirm, setResetConfirm] = useState<string | null>(null);
   const [cebResetConfirm, setCebResetConfirm] = useState(false);
+  const [specOpsResetConfirm, setSpecOpsResetConfirm] = useState(false);
+  const [consumablesResetConfirm, setConsumablesResetConfirm] = useState(false);
 
   async function loadPlayer() {
     const supabase = createClient();
@@ -214,6 +218,34 @@ export default function PlayerProgressionPage({
     } else {
       toast("CEB skills reset and XP refunded");
       setCebResetConfirm(false);
+      loadCampaignData(selectedCampaignId);
+    }
+  }
+
+  async function handleSpecOpsReset() {
+    const formData = new FormData();
+    formData.set("playerId", playerId);
+    formData.set("campaignId", selectedCampaignId);
+    const result = await resetPlayerSpecOps(formData);
+    if (result.error) {
+      toast(result.error, "error");
+    } else {
+      toast("Spec-Ops reset and XP refunded");
+      setSpecOpsResetConfirm(false);
+      loadCampaignData(selectedCampaignId);
+    }
+  }
+
+  async function handleConsumablesReset() {
+    const formData = new FormData();
+    formData.set("playerId", playerId);
+    formData.set("campaignId", selectedCampaignId);
+    const result = await resetPlayerConsumables(formData);
+    if (result.error) {
+      toast(result.error, "error");
+    } else {
+      toast("Consumables reset and XP refunded");
+      setConsumablesResetConfirm(false);
       loadCampaignData(selectedCampaignId);
     }
   }
@@ -408,6 +440,57 @@ export default function PlayerProgressionPage({
             }`}
           >
             Reset CEB Skills
+          </button>
+        )}
+        {specOpsResetConfirm ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleSpecOpsReset}
+              className="px-4 py-2.5 bg-red/15 border-2 border-red-dim text-red hover:bg-red/25 hover:border-red font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+            >
+              Confirm Reset Spec-Ops
+            </button>
+            <button
+              onClick={() => setSpecOpsResetConfirm(false)}
+              className="px-4 py-2.5 border border-border text-text-secondary font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setSpecOpsResetConfirm(true)}
+            disabled={specOps.length === 0}
+            className={`px-4 py-2.5 border font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer ${
+              specOps.length > 0
+                ? "border-red-dim/40 text-red hover:bg-red/10 hover:border-red-dim"
+                : "border-border/30 text-text-muted/30 cursor-not-allowed"
+            }`}
+          >
+            Reset Spec-Ops
+          </button>
+        )}
+        {consumablesResetConfirm ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleConsumablesReset}
+              className="px-4 py-2.5 bg-red/15 border-2 border-red-dim text-red hover:bg-red/25 hover:border-red font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+            >
+              Confirm Reset Consumables
+            </button>
+            <button
+              onClick={() => setConsumablesResetConfirm(false)}
+              className="px-4 py-2.5 border border-border text-text-secondary font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConsumablesResetConfirm(true)}
+            className="px-4 py-2.5 border border-red-dim/40 text-red hover:bg-red/10 hover:border-red-dim font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+          >
+            Reset Consumables
           </button>
         )}
       </div>
