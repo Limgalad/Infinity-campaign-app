@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, use } from "react";
+import { useState, useEffect, useMemo, useRef, use } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/toast";
@@ -134,6 +134,10 @@ export default function ChapterPage({
   // UI state
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
+
+  // Step refs for auto-scroll
+  const step2Ref = useRef<HTMLDivElement>(null);
+  const step3Ref = useRef<HTMLDivElement>(null);
 
   async function loadData() {
     const supabase = createClient();
@@ -434,6 +438,22 @@ export default function ChapterPage({
   const step1Complete = objectivePoints > 0;
   const step2Complete = promotionRoll !== null && promotionRoll >= 1 && promotionRoll <= 20;
 
+  // Auto-scroll to next step when current step completes
+  const prevStep1 = useRef(false);
+  const prevStep2 = useRef(false);
+  useEffect(() => {
+    if (step1Complete && !prevStep1.current && !hasSubmitted) {
+      setTimeout(() => step2Ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+    }
+    prevStep1.current = step1Complete;
+  }, [step1Complete, hasSubmitted]);
+  useEffect(() => {
+    if (step2Complete && !prevStep2.current && !hasSubmitted) {
+      setTimeout(() => step3Ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+    }
+    prevStep2.current = step2Complete;
+  }, [step2Complete, hasSubmitted]);
+
   return (
     <div style={{ animation: "slide-up 0.5s ease-out" }} className="pb-12">
       {/* Header */}
@@ -620,7 +640,7 @@ export default function ChapterPage({
       </div>
 
       {/* STEP 2: PROMOTION ROLL */}
-      <div className={`panel p-4 sm:p-5 mb-6 transition-all duration-300 ${
+      <div ref={step2Ref} className={`panel p-4 sm:p-5 mb-6 transition-all duration-300 scroll-mt-4 ${
         hasSubmitted ? "opacity-60 pointer-events-none" : !step1Complete ? "opacity-30 pointer-events-none" : ""
       }`}>
         <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
@@ -664,7 +684,7 @@ export default function ChapterPage({
 
       {/* STEP 3: SUBMIT */}
       {!hasSubmitted && (
-        <div className={`panel panel-glow p-4 sm:p-5 mb-8 transition-all duration-300 ${!step2Complete ? "opacity-30 pointer-events-none border-border/30" : "border-cyan-dim/40"}`}>
+        <div ref={step3Ref} className={`panel panel-glow p-4 sm:p-5 mb-8 transition-all duration-300 scroll-mt-4 ${!step2Complete ? "opacity-30 pointer-events-none border-border/30" : "border-cyan-dim/40"}`}>
           <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
             <div className="w-1 h-5 bg-green" />
             <h2 className="font-[family-name:var(--font-orbitron)] text-sm tracking-[0.15em] text-text-primary uppercase">Review & Submit</h2>
