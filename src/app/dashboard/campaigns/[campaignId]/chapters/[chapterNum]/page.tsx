@@ -143,6 +143,8 @@ export default function ChapterPage({
   // Step refs for auto-scroll
   const step2Ref = useRef<HTMLDivElement>(null);
   const step3Ref = useRef<HTMLDivElement>(null);
+  const prevStep1 = useRef(false);
+  const prevStep2 = useRef(false);
 
   async function loadData() {
     const supabase = createClient();
@@ -514,6 +516,24 @@ export default function ChapterPage({
     { value: "lose", label: "DEFEAT", color: "text-red border-red-dim bg-red/10" },
   ];
 
+  const hasSubmitted = existingResult !== null;
+  const step1Complete = objectivePoints > 0;
+  const step2Complete = promotionRoll !== null && promotionRoll >= 1 && promotionRoll <= 20;
+
+  // Auto-scroll to next step when current step completes
+  useEffect(() => {
+    if (step1Complete && !prevStep1.current && !hasSubmitted) {
+      setTimeout(() => step2Ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+    }
+    prevStep1.current = step1Complete;
+  }, [step1Complete, hasSubmitted]);
+  useEffect(() => {
+    if (step2Complete && !prevStep2.current && !hasSubmitted) {
+      setTimeout(() => step3Ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+    }
+    prevStep2.current = step2Complete;
+  }, [step2Complete, hasSubmitted]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -533,26 +553,6 @@ export default function ChapterPage({
       </div>
     );
   }
-
-  const hasSubmitted = existingResult !== null;
-  const step1Complete = objectivePoints > 0;
-  const step2Complete = promotionRoll !== null && promotionRoll >= 1 && promotionRoll <= 20;
-
-  // Auto-scroll to next step when current step completes
-  const prevStep1 = useRef(false);
-  const prevStep2 = useRef(false);
-  useEffect(() => {
-    if (step1Complete && !prevStep1.current && !hasSubmitted) {
-      setTimeout(() => step2Ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
-    }
-    prevStep1.current = step1Complete;
-  }, [step1Complete, hasSubmitted]);
-  useEffect(() => {
-    if (step2Complete && !prevStep2.current && !hasSubmitted) {
-      setTimeout(() => step3Ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
-    }
-    prevStep2.current = step2Complete;
-  }, [step2Complete, hasSubmitted]);
 
   return (
     <div style={{ animation: "slide-up 0.5s ease-out" }} className="pb-12">
