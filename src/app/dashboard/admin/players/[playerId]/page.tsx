@@ -39,6 +39,7 @@ export default function PlayerProgressionPage({
   const [promotion, setPromotion] = useState<CommanderPromotion | null>(null);
   const [specOps, setSpecOps] = useState<SpecOps[]>([]);
   const [gameResults, setGameResults] = useState<(GameResult & { chapter_number?: number; chapter_name?: string })[]>([]);
+  const [consumableCount, setConsumableCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
   const [showXpAdjust, setShowXpAdjust] = useState(false);
@@ -133,15 +134,22 @@ export default function PlayerProgressionPage({
     setPromotion(promo as CommanderPromotion | null);
     setSpecOps((specs as SpecOps[]) ?? []);
 
-    // Load game results across all chapters
+    // Load game results and consumables across all chapters
     const chapterIds = chaptersData.map((c) => c.id);
     if (chapterIds.length > 0) {
-      const { data: results } = await supabase
-        .from("game_results")
-        .select("*")
-        .eq("player_id", playerId)
-        .in("chapter_id", chapterIds)
-        .order("submitted_at", { ascending: false });
+      const [{ data: results }, { data: consumables }] = await Promise.all([
+        supabase
+          .from("game_results")
+          .select("*")
+          .eq("player_id", playerId)
+          .in("chapter_id", chapterIds)
+          .order("submitted_at", { ascending: false }),
+        supabase
+          .from("consumables")
+          .select("id")
+          .eq("player_id", playerId)
+          .in("chapter_id", chapterIds),
+      ]);
 
       const enriched = ((results as GameResult[]) ?? []).map((r) => {
         const ch = chaptersData.find((c) => c.id === r.chapter_id);
@@ -152,8 +160,10 @@ export default function PlayerProgressionPage({
         };
       });
       setGameResults(enriched);
+      setConsumableCount((consumables ?? []).length);
     } else {
       setGameResults([]);
+      setConsumableCount(0);
     }
   }
 
@@ -488,7 +498,12 @@ export default function PlayerProgressionPage({
         ) : (
           <button
             onClick={() => setConsumablesResetConfirm(true)}
-            className="px-4 py-2.5 border border-red-dim/40 text-red hover:bg-red/10 hover:border-red-dim font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer"
+            disabled={consumableCount === 0}
+            className={`px-4 py-2.5 border font-[family-name:var(--font-mono)] text-xs tracking-wider uppercase transition-all cursor-pointer ${
+              consumableCount > 0
+                ? "border-red-dim/40 text-red hover:bg-red/10 hover:border-red-dim"
+                : "border-border/30 text-text-muted/30 cursor-not-allowed"
+            }`}
           >
             Reset Consumables
           </button>
