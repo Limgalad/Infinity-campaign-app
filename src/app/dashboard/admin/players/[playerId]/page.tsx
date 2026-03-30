@@ -105,7 +105,7 @@ export default function PlayerProgressionPage({
         .select("*")
         .eq("player_id", playerId)
         .eq("campaign_id", campaignId)
-        .single(),
+        .maybeSingle(),
       supabase
         .from("spec_ops")
         .select("*")

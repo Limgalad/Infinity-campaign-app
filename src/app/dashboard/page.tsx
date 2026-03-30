@@ -90,7 +90,7 @@ export default async function DashboardPage() {
               .from("strike_teams")
               .select("*, player1:players!strike_teams_player1_id_fkey(display_name, faction), player2:players!strike_teams_player2_id_fkey(display_name, faction)")
               .eq("id", opponentTeamId)
-              .single();
+              .maybeSingle();
 
             const p1 = myTeam.player1 as unknown as { display_name: string; faction: string | null } | null;
             const p2 = myTeam.player2 as unknown as { display_name: string; faction: string | null } | null;

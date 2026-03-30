@@ -92,7 +92,7 @@ export async function submitPromotionRoll(formData: FormData): Promise<{ success
     .select("current_level")
     .eq("player_id", user.id)
     .eq("campaign_id", campaignId)
-    .single();
+    .maybeSingle();
 
   const currentLevel = promo?.current_level ?? 0;
   const newLevel = success ? currentLevel + 1 : null;
@@ -276,7 +276,7 @@ export async function selectFreeCebSkill(formData: FormData): Promise<{ success?
     .select("current_level")
     .eq("player_id", user.id)
     .eq("campaign_id", campaignId)
-    .single();
+    .maybeSingle();
 
   const commanderLevel = promo?.current_level ?? 0;
   if (level > commanderLevel) {

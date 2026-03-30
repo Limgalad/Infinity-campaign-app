@@ -211,7 +211,7 @@ export async function getCommanderPromotion(
     .select("*")
     .eq("player_id", playerId)
     .eq("campaign_id", campaignId)
-    .single();
+    .maybeSingle();
   return data as CommanderPromotion | null;
 }
 
