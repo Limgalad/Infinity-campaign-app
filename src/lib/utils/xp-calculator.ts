@@ -142,13 +142,13 @@ export const PROMOTION_BENEFITS: Record<number, string[]> = {
  * Each level grants 2 free picks from that CEB tier.
  * E.g. Commander Level 1 → 2 free L1 picks, Level 2 → 2 free L2 picks, etc.
  */
-export function getFreeCebSkillsPerLevel(commanderLevel: number): { level: number; count: number }[] {
-  const result: { level: number; count: number }[] = [];
-  for (let l = 1; l <= commanderLevel; l++) {
-    result.push({ level: l, count: 2 });
-  }
-  return result;
-}
+// export function getFreeCebSkillsPerLevel(commanderLevel: number): { level: number; count: number }[] {
+//   const result: { level: number; count: number }[] = [];
+//   for (let l = 1; l <= commanderLevel; l++) {
+//     result.push({ level: l, count: 2 });
+//   }
+//   return result;
+// }
 
 /**
  * Get CEB activation limits based on commander level.
