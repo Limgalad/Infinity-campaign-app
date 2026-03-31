@@ -9,7 +9,6 @@ import {
   submitPromotionRoll,
   purchaseCebLevel,
   removeCebLevel,
-  selectFreeCebSkill,
   purchaseConsumable,
   addSpecOpsSkill,
 } from "../../../actions";
@@ -20,7 +19,6 @@ import {
   CEB_LEVEL_COSTS,
   PROMOTION_BENEFITS,
   getCebActivationLimits,
-  getFreeCebSkillsPerLevel,
 } from "@/lib/utils/xp-calculator";
 import type {
   GameResultType,
@@ -251,7 +249,6 @@ export default function ChapterPage({
   useEffect(() => { loadData(); }, [campaignId, chapterNumber]);
 
   const activationLimits = getCebActivationLimits(commanderLevel);
-  const freeSkillSlots = getFreeCebSkillsPerLevel(commanderLevel);
 
   const xpEarned = useMemo(
     () => calculateGameXP(objectivePoints, result, strikeTeamWin),
@@ -271,26 +268,9 @@ export default function ChapterPage({
 
   const promotionSuccess = promotionRoll !== null ? isPromotionSuccess(promotionRoll, promotionCalc.targetNumber) : null;
 
-  // Count free picks per level
-  const freePicksCount = useMemo(() => {
-    const counts: Record<number, number> = {};
-    for (const col of Object.values(purchasedCEB)) {
-      for (const entry of col) {
-        if (entry.xp_cost === 0) {
-          counts[entry.level] = (counts[entry.level] ?? 0) + 1;
-        }
-      }
-    }
-    return counts;
-  }, [purchasedCEB]);
-
   // Helper to check if a CEB level is purchased
   function isCebPurchased(colKey: string, level: number): boolean {
     return purchasedCEB[colKey]?.some((e) => e.level === level) ?? false;
-  }
-
-  function isCebFree(colKey: string, level: number): boolean {
-    return purchasedCEB[colKey]?.some((e) => e.level === level && e.xp_cost === 0) ?? false;
   }
 
   async function handleSubmitReport() {
@@ -369,28 +349,17 @@ export default function ChapterPage({
     let cost = 0;
     for (const p of pendingCEB) {
       if (p.action === "add") {
-        // Check if it would be free
-        const freeSlot = freeSkillSlots.find((s) => s.level === p.level);
-        // Count existing free + pending free adds at this level
-        const existingFree = freePicksCount[p.level] ?? 0;
-        const pendingFreeAdds = pendingCEB
-          .filter((pp) => pp.action === "add" && pp.level === p.level)
-          .indexOf(p);
-        const totalFreeUsed = existingFree + pendingFreeAdds;
-        const isFree = freeSlot && totalFreeUsed < freeSlot.count;
-        if (!isFree) {
-          cost += CEB_LEVEL_COSTS[p.level] ?? 0;
-        }
+        cost += CEB_LEVEL_COSTS[p.level] ?? 0;
       } else {
-        // Removing: refund (only if it was paid)
+        // Removing: refund
         const entry = purchasedCEB[p.columnType]?.find((e) => e.level === p.level);
-        if (entry && entry.xp_cost > 0) {
+        if (entry) {
           cost -= entry.xp_cost;
         }
       }
     }
     return cost;
-  }, [pendingCEB, freeSkillSlots, freePicksCount, purchasedCEB]);
+  }, [pendingCEB, purchasedCEB]);
 
   const pendingConsumableXpCost = useMemo(() => {
     return pendingConsumables.reduce((sum, key) => {
@@ -421,42 +390,20 @@ export default function ChapterPage({
           return;
         }
       } else {
-        // Add — check if free
-        const freeSlot = freeSkillSlots.find((s) => s.level === p.level);
-        const existingFree = freePicksCount[p.level] ?? 0;
-        const pendingFreeAdds = pendingCEB
-          .filter((pp) => pp.action === "add" && pp.level === p.level);
-        const myIndex = pendingFreeAdds.indexOf(p);
-        const totalFreeUsed = existingFree + myIndex;
-        const isFree = freeSlot && totalFreeUsed < freeSlot.count;
-
-        if (isFree) {
-          const formData = new FormData();
-          formData.set("campaignId", campaignId);
-          formData.set("columnType", p.columnType);
-          formData.set("level", p.level.toString());
-          formData.set("chapterNumber", chapterNumber.toString());
-          const res = await selectFreeCebSkill(formData);
-          if (res.error) {
-            toast(res.error, "error");
-            setSubmitting(false);
-            return;
-          }
-        } else {
-          const xpCost = CEB_LEVEL_COSTS[p.level];
-          const formData = new FormData();
-          formData.set("campaignId", campaignId);
-          formData.set("columnType", p.columnType);
-          formData.set("level", p.level.toString());
-          formData.set("xpCost", xpCost.toString());
-          formData.set("chapterNumber", chapterNumber.toString());
-          formData.set("chapterId", chapter.id);
-          const res = await purchaseCebLevel(formData);
-          if (res.error) {
-            toast(res.error, "error");
-            setSubmitting(false);
-            return;
-          }
+        // Add — purchase with XP
+        const xpCost = CEB_LEVEL_COSTS[p.level];
+        const formData = new FormData();
+        formData.set("campaignId", campaignId);
+        formData.set("columnType", p.columnType);
+        formData.set("level", p.level.toString());
+        formData.set("xpCost", xpCost.toString());
+        formData.set("chapterNumber", chapterNumber.toString());
+        formData.set("chapterId", chapter.id);
+        const res = await purchaseCebLevel(formData);
+        if (res.error) {
+          toast(res.error, "error");
+          setSubmitting(false);
+          return;
         }
       }
     }
@@ -880,9 +827,6 @@ export default function ChapterPage({
           </div>
           <div className="font-[family-name:var(--font-mono)] text-xs text-text-secondary sm:text-right pl-4 sm:pl-0">
             ACTIVATION: {activationLimits.maxBonusesPerColumn} per column / {activationLimits.maxColumns} columns
-            {freeSkillSlots.length > 0 && (
-              <span className="ml-3 text-green">| FREE PICKS: {freeSkillSlots.map((s) => `${2 - (freePicksCount[s.level] ?? 0)} left at L${s.level}`).join(", ")}</span>
-            )}
           </div>
         </div>
 
@@ -898,14 +842,10 @@ export default function ChapterPage({
             {[1, 2, 3, 4].map((level) =>
               CEB_COLUMNS.map((col) => {
                 const isOwned = isCebPurchased(col.key, level);
-                const isFree = isCebFree(col.key, level);
                 const isPending = isCebPending(col.key, level);
                 const isEffective = isEffectiveCebPurchased(col.key, level);
                 const previousOwned = level === 1 || isEffectiveCebPurchased(col.key, level - 1);
-                const freeSlot = freeSkillSlots.find((s) => s.level === level);
-                const currentFreeCount = freePicksCount[level] ?? 0;
-                const hasFreeSlot = freeSlot && currentFreeCount < freeSlot.count;
-                const canAfford = hasFreeSlot || (xpSummary.available - pendingCebXpCost - pendingConsumableXpCost) >= CEB_LEVEL_COSTS[level];
+                const canAfford = (xpSummary.available - pendingCebXpCost - pendingConsumableXpCost) >= CEB_LEVEL_COSTS[level];
                 const canToggle = isEffective ? !hasSubmitted : (previousOwned && canAfford);
                 const levelDesc = col.levels[level - 1];
 
@@ -920,20 +860,16 @@ export default function ChapterPage({
                           ? "bg-amber/15 border-amber border-dashed"
                           : "bg-red/10 border-red-dim border-dashed"
                         : isOwned
-                          ? isFree
-                            ? "bg-green/15 border-green-dim/40 hover:border-green"
-                            : "bg-cyan/15 border-cyan-dim/40 hover:border-cyan"
+                          ? "bg-cyan/15 border-cyan-dim/40 hover:border-cyan"
                           : canToggle
-                            ? hasFreeSlot
-                              ? "bg-surface/50 border-green-dim/30 hover:border-green hover:bg-green/5"
-                              : "bg-surface/50 border-border hover:border-amber-dim hover:bg-amber/5"
+                            ? "bg-surface/50 border-border hover:border-amber-dim hover:bg-amber/5"
                             : "bg-surface/20 border-border/30 opacity-40 cursor-not-allowed"
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className={`font-[family-name:var(--font-mono)] text-xs font-bold ${isEffective ? (isPending ? "text-amber" : isFree ? "text-green" : "text-cyan") : isPending ? "text-red" : "text-text-muted"}`}>L{level}</span>
-                      <span className={`font-[family-name:var(--font-mono)] text-xs ${isEffective ? (isPending ? "text-amber" : isFree ? "text-green-dim" : "text-cyan-dim") : "text-text-muted"}`}>
-                        {isFree && isOwned && !isPending ? "FREE" : `${CEB_LEVEL_COSTS[level]} XP`}
+                      <span className={`font-[family-name:var(--font-mono)] text-xs font-bold ${isEffective ? (isPending ? "text-amber" : "text-cyan") : isPending ? "text-red" : "text-text-muted"}`}>L{level}</span>
+                      <span className={`font-[family-name:var(--font-mono)] text-xs ${isEffective ? (isPending ? "text-amber" : "text-cyan-dim") : "text-text-muted"}`}>
+                        {CEB_LEVEL_COSTS[level]} XP
                       </span>
                     </div>
                     <div className={`font-[family-name:var(--font-mono)] text-xs leading-snug ${isEffective ? "text-text-primary" : "text-text-secondary"}`}>{levelDesc}</div>
@@ -943,7 +879,7 @@ export default function ChapterPage({
                       </div>
                     )}
                     {isOwned && !isPending && (
-                      <div className={`absolute top-1 right-1 w-4 h-4 ${isFree ? "bg-green" : "bg-cyan"} flex items-center justify-center`}>
+                      <div className="absolute top-1 right-1 w-4 h-4 bg-cyan flex items-center justify-center">
                         <svg className="w-2.5 h-2.5 text-void" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="square" d="M5 13l4 4L19 7" /></svg>
                       </div>
                     )}
@@ -1037,12 +973,6 @@ export default function ChapterPage({
                   <span className="font-[family-name:var(--font-mono)] text-xs text-text-primary">{benefit}</span>
                 </div>
               ))}
-              {commanderLevel > 0 && (
-                <div className="flex items-center gap-2 px-3 py-2 bg-green/5 border border-green-dim/30">
-                  <div className="w-1 h-4 bg-green" />
-                  <span className="font-[family-name:var(--font-mono)] text-xs text-green">2 free CEB skills per level (L1-L{commanderLevel})</span>
-                </div>
-              )}
             </div>
           </div>
         </div>
